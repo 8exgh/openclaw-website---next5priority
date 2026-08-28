@@ -1,0 +1,31 @@
+{
+  "name": "openclaw-website-template",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Event-sourced website template provisioned for OpenClaw customers. First feature: self-booking with the owner's calendar and Google Calendar sync.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test:domain": "node --experimental-strip-types --test src/lib/*.test.ts",
+    "test:e2e": "next build && playwright test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "next": "^16.3.0",
+    "nodemailer": "^9.0.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^19.2.18",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2"
+  }
+}

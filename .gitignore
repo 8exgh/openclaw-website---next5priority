@@ -1,0 +1,8 @@
+node_modules/
+data/
+.next/
+*.db
+*.db-*
+.playwright/
+playwright-report/
+test-results/

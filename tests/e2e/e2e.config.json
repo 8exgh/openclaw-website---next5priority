@@ -1,0 +1,17 @@
+{
+  "host": "127.0.0.1",
+  "port": 3210,
+  "webhookPort": 3211,
+  "smtpPort": 3212,
+  "artifactDir": ".playwright",
+  "dbFile": ".playwright/site.db",
+  "webhookLog": ".playwright/webhook.log",
+  "mailLog": ".playwright/mail.log",
+  "smtpModeFile": ".playwright/smtp-mode",
+  "clawKey": "e2e-claw-key",
+  "claw": "openclawe2e",
+  "ownerEmail": "owner@example.test",
+  "smtpUser": "bookings@example.test",
+  "emailFrom": "\"Bookings\" <bookings@example.test>",
+  "timeZone": "America/Edmonton"
+}
