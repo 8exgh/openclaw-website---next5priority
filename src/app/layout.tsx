@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { site } from "../lib/config.ts";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: `${site.businessName} — ${site.location}`,
-  description: `${site.businessName}: ${site.tagline}`,
+  title: "Next 5 Priority",
+  description: "A focused, hierarchical project command centre for teams and automation.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

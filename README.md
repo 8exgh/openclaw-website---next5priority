@@ -1,4 +1,6 @@
-# openclaw-website-template
+# Next 5 Priority
+
+Multi-user hierarchical project management for people and automation. It provides passwordless email-code login, admin/editor/read-only roles, unlimited nested tasks, computed parent states, permanent workflow sections, and a bearer-token bot API at `/api/v1/tasks`.
 
 The event-sourced website every OpenClaw customer is provisioned from. It is
 not a brochure: it takes bookings, shows the owner's calendar, and gets them

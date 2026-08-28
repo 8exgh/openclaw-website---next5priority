@@ -1,0 +1,7 @@
+import crypto from "node:crypto";
+import { NextRequest, NextResponse } from "next/server";
+import { sendEmail } from "../../../../lib/email";
+import { allowed, requestUser } from "../../../../lib/request-auth";
+import { projectDb, type Role } from "../../../../lib/project-store";
+export async function GET(req:NextRequest){const db=projectDb();const u=requestUser(req,db);if(!allowed(u,"admin")){db.close();return NextResponse.json({error:"Admin required"},{status:403});}const users=db.prepare("SELECT id,email,role,created_at createdAt FROM users ORDER BY created_at").all();db.close();return NextResponse.json({users});}
+export async function POST(req:NextRequest){const db=projectDb();const u=requestUser(req,db);if(!allowed(u,"admin")){db.close();return NextResponse.json({error:"Admin required"},{status:403});}const b=await req.json();const email=String(b.email||"").trim().toLowerCase();const role=String(b.role||"read") as Role;if(!/^\S+@\S+\.\S+$/.test(email)||!["read","edit","admin"].includes(role)){db.close();return NextResponse.json({error:"Valid email and role required"},{status:400});}db.prepare("INSERT INTO users VALUES (?,?,?,?) ON CONFLICT(email) DO UPDATE SET role=excluded.role").run(crypto.randomUUID(),email,role,new Date().toISOString());db.close();await sendEmail({to:email,subject:"You have been invited to Next 5 Priority",text:`You now have ${role} access. Visit https://next5priority.fusenv.com and request a login code.`});return NextResponse.json({ok:true});}
