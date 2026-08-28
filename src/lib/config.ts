@@ -1,7 +1,7 @@
 /* The one file a customer (or their claw) edits to brand the site.
    All fields are required — page.tsx references them and the build type-checks. */
 export const site = {
-  businessName: "Your Business",
+  businessName: "sean",
   tagline: "Book a time in a couple of clicks.",
   bookingIntro: "Choose a time that suits you and we will confirm by email.",
   bookingDays: 14,
@@ -9,7 +9,7 @@ export const site = {
      Rocket.Chat ping) and the reply-to on every email a visitor receives.
      Stamped by provisioning from --email; the deploy's OWNER_EMAIL env (from
      8examples' record of the customer) overrides it. */
-  ownerEmail: "",
+  ownerEmail: "sean@besavvier.com",
   /* IANA zone used to render times in emails and chat pings. Matches the
      9-5 Mountain availability seeded in site.ts. */
   timeZone: "America/Edmonton",
