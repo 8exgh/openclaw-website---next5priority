@@ -1,3 +1,4 @@
+import { notifyProjectInBackground } from "./project-notifications.ts";
 import { siteDb } from "./site.ts";
 import { notifyInBackground } from "./notification-processor.ts";
 import { runDailySuggestion } from "./suggestion-processor.ts";
@@ -5,7 +6,7 @@ import { runDailySuggestion } from "./suggestion-processor.ts";
 /* In-process scheduler, started once per server from instrumentation.ts.
    Each site is one long-running container and nothing external crons it,
    so the background jobs run on timers here:
-     - the booking-notification sweep every 5 minutes (a no-op when nothing
+     - booking and project notification sweeps every 5 minutes (a no-op when nothing
        is owed; the real work usually happened in the post-command kick)
      - the daily tick (maybe-a-tip suggestion) once per 24h of uptime; its
        own at-most-once-a-day guard handles restarts.
@@ -34,11 +35,17 @@ async function dailyTick(): Promise<void> {
 export function startScheduler(): boolean {
   if (g.__siteScheduler || process.env.SITE_SCHEDULER === "0") return false;
   g.__siteScheduler = true;
-  const sweep = () => notifyInBackground(process.env.SITE_URL);
+  const sweep = () =>
+    Promise.allSettled([
+      notifyInBackground(process.env.SITE_URL),
+      notifyProjectInBackground(),
+    ]);
   setTimeout(sweep, FIRST_NOTIFY_MS).unref();
   setInterval(sweep, NOTIFY_EVERY_MS).unref();
   setTimeout(dailyTick, FIRST_TICK_MS).unref();
   setInterval(dailyTick, TICK_EVERY_MS).unref();
-  console.log(`scheduler: notification sweep every ${NOTIFY_EVERY_MS / 60_000} min, daily tick every 24h`);
+  console.log(
+    `scheduler: notification sweep every ${NOTIFY_EVERY_MS / 60_000} min, daily tick every 24h`,
+  );
   return true;
 }

@@ -2,7 +2,7 @@
   "name": "openclaw-website-template",
   "version": "0.1.0",
   "private": true,
-  "description": "Event-sourced website template provisioned for OpenClaw customers. First feature: self-booking with the owner's calendar and Google Calendar sync.",
+  "description": "Next 5 Priority: shared feature planning and bug tracking with CQRS events and background notifications.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

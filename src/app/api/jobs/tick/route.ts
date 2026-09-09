@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { siteDb } from "../../../../lib/site.ts";
+import { projectDb } from "../../../../lib/project-store.ts";
+import { runProjectNotifications } from "../../../../lib/project-notifications.ts";
 import { runDailySuggestion } from "../../../../lib/suggestion-processor.ts";
 import { runBookingNotifications } from "../../../../lib/notification-processor.ts";
 
@@ -12,11 +13,18 @@ export async function POST(request: NextRequest) {
   if (!key || request.headers.get("x-claw-key") !== key) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const db = siteDb();
+  const db = projectDb();
   try {
-    const notifications = await runBookingNotifications(db, { siteUrl: process.env.SITE_URL || request.nextUrl.origin });
+    const notifications = await runBookingNotifications(db, {
+      siteUrl: process.env.SITE_URL || request.nextUrl.origin,
+    });
     const suggestion = await runDailySuggestion(db);
-    return NextResponse.json({ notifications, suggestion });
+    const projectNotifications = await runProjectNotifications(db);
+    return NextResponse.json({
+      projectNotifications,
+      notifications,
+      suggestion,
+    });
   } finally {
     db.close();
   }

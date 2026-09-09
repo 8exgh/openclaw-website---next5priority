@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { siteDb } from "../../../../lib/site.ts";
+import { projectDb } from "../../../../lib/project-store.ts";
+import { runProjectNotifications } from "../../../../lib/project-notifications.ts";
 import { runBookingNotifications } from "../../../../lib/notification-processor.ts";
 
 /* Notification sweep. Safe to hit often (every few minutes): it only sends
@@ -11,10 +12,13 @@ export async function POST(request: NextRequest) {
   if (!key || request.headers.get("x-claw-key") !== key) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const db = siteDb();
+  const db = projectDb();
   try {
-    const notifications = await runBookingNotifications(db, { siteUrl: process.env.SITE_URL || request.nextUrl.origin });
-    return NextResponse.json({ notifications });
+    const notifications = await runBookingNotifications(db, {
+      siteUrl: process.env.SITE_URL || request.nextUrl.origin,
+    });
+    const projectNotifications = await runProjectNotifications(db);
+    return NextResponse.json({ projectNotifications, notifications });
   } finally {
     db.close();
   }

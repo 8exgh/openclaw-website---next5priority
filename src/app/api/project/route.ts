@@ -1,10 +1,102 @@
-import crypto from "node:crypto";
-import { NextRequest, NextResponse } from "next/server";
-import { appendEvent } from "../../../lib/events";
-import { allowed, requestUser } from "../../../lib/request-auth";
-import { projectDb, snapshot, type TaskState } from "../../../lib/project-store";
+import { after, NextRequest, NextResponse } from "next/server";
+import { requestUser } from "../../../lib/request-auth";
+import {
+  allTasks,
+  itemDetail,
+  listUsers,
+  projectDb,
+  snapshot,
+} from "../../../lib/project-store";
+import {
+  addComment,
+  createItem,
+  deleteItem,
+  followItem,
+  linkItem,
+  unlinkItem,
+  updateItem,
+} from "../../../lib/project-commands";
+import { commandBody, projectError } from "../../../lib/project-http";
+import { ProjectError } from "../../../lib/project-errors";
+import { notifyProjectInBackground } from "../../../lib/project-notifications";
 
-export async function GET(req: NextRequest) { const db=projectDb(); const user=requestUser(req,db); if(!user){db.close();return NextResponse.json({error:"Unauthorized"},{status:401});} const sections=snapshot(db); db.close(); return NextResponse.json({user,sections}); }
-export async function POST(req: NextRequest) { const db=projectDb(); const user=requestUser(req,db); if(!allowed(user,"edit")){db.close();return NextResponse.json({error:"Edit access required"},{status:403});} const b=await req.json(); const sectionId=String(b.sectionId||""); const parentId=b.parentId?String(b.parentId):null; const title=String(b.title||"").trim(); if(!title){db.close();return NextResponse.json({error:"Title is required"},{status:400});} if(parentId){const p=db.prepare("SELECT section_id FROM tasks WHERE id=?").get(parentId) as {section_id:string}|undefined;if(!p||p.section_id!==sectionId){db.close();return NextResponse.json({error:"Invalid parent"},{status:400});}} const pos=(db.prepare("SELECT COALESCE(MAX(position),-1)+1 n FROM tasks WHERE section_id=? AND parent_id IS ?").get(sectionId,parentId) as {n:number}).n; const id=crypto.randomUUID(); const now=new Date().toISOString(); db.prepare("INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?)").run(id,sectionId,parentId,title,"in_progress",pos,now,now); appendEvent(db,"task_created",{id,sectionId,parentId,title,by:user!.id}); const sections=snapshot(db); db.close(); return NextResponse.json({sections}); }
-export async function PATCH(req: NextRequest) { const db=projectDb(); const user=requestUser(req,db); if(!allowed(user,"edit")){db.close();return NextResponse.json({error:"Edit access required"},{status:403});} const b=await req.json(); const id=String(b.id||""); const row=db.prepare("SELECT * FROM tasks WHERE id=?").get(id); if(!row){db.close();return NextResponse.json({error:"Not found"},{status:404});} if(b.state){const state=String(b.state) as TaskState;if(!["in_progress","in_qa","done"].includes(state)){db.close();return NextResponse.json({error:"Invalid state"},{status:400});} const children=(db.prepare("SELECT COUNT(*) n FROM tasks WHERE parent_id=?").get(id) as {n:number}).n;if(children){db.close();return NextResponse.json({error:"Parent state is computed from its children."},{status:409});} db.prepare("UPDATE tasks SET state=?,updated_at=? WHERE id=?").run(state,new Date().toISOString(),id);} if(typeof b.title==="string"&&b.title.trim())db.prepare("UPDATE tasks SET title=?,updated_at=? WHERE id=?").run(b.title.trim(),new Date().toISOString(),id); appendEvent(db,"task_updated",{id,state:b.state,title:b.title,by:user!.id}); const sections=snapshot(db);db.close();return NextResponse.json({sections}); }
-export async function DELETE(req: NextRequest) { const db=projectDb();const user=requestUser(req,db);if(!allowed(user,"edit")){db.close();return NextResponse.json({error:"Edit access required"},{status:403});}const id=req.nextUrl.searchParams.get("id");const remove=(taskId:string)=>{const children=db.prepare("SELECT id FROM tasks WHERE parent_id=?").all(taskId) as {id:string}[];children.forEach(c=>remove(c.id));db.prepare("DELETE FROM tasks WHERE id=?").run(taskId);};if(id)remove(id);appendEvent(db,"task_deleted",{id,by:user!.id});const sections=snapshot(db);db.close();return NextResponse.json({sections}); }
+export async function GET(req: NextRequest) {
+  const db = projectDb();
+  try {
+    const user = requestUser(req, db);
+    if (!user) throw new ProjectError("Unauthorized", 401);
+    const id = req.nextUrl.searchParams.get("id");
+    if (id) {
+      const detail = itemDetail(db, id);
+      if (!detail) throw new ProjectError("Item not found.", 404);
+      return NextResponse.json({ detail });
+    }
+    return NextResponse.json({
+      user,
+      users: listUsers(db),
+      sections: snapshot(db),
+      items: allTasks(db).map((t) => ({ ...t, children: [] })),
+    });
+  } catch (error) {
+    return projectError(error);
+  } finally {
+    db.close();
+  }
+}
+async function mutate(req: NextRequest, method: "POST" | "PATCH" | "DELETE") {
+  const db = projectDb();
+  try {
+    const user = requestUser(req, db);
+    if (!user) throw new ProjectError("Unauthorized", 401);
+    let id: string | undefined;
+    if (method === "DELETE") {
+      deleteItem(db, user, req.nextUrl.searchParams.get("id") || "");
+    } else {
+      const { input, uploads } = await commandBody(req);
+      if (method === "POST") {
+        const action = input.action ?? "create";
+        if (uploads.length && !["create", "comment"].includes(String(action)))
+          throw new ProjectError(
+            "Attachments belong to a description or comment.",
+          );
+        switch (action) {
+          case "create":
+            id = createItem(db, user, input, uploads).id;
+            break;
+          case "comment":
+            id = addComment(db, user, input, uploads).taskId;
+            break;
+          case "follow":
+            followItem(db, user, input);
+            id = String(input.id);
+            break;
+          case "link":
+            id = linkItem(db, user, input).sourceId;
+            break;
+          case "unlink":
+            unlinkItem(db, user, input);
+            id = String(input.id);
+            break;
+          default:
+            throw new ProjectError("Unknown action.");
+        }
+      } else id = updateItem(db, user, input, uploads).id;
+    }
+    after(notifyProjectInBackground);
+    return NextResponse.json(
+      {
+        id,
+        sections: snapshot(db),
+        ...(id ? { detail: itemDetail(db, id) } : {}),
+      },
+      { status: method === "POST" ? 201 : 200 },
+    );
+  } catch (error) {
+    return projectError(error);
+  } finally {
+    db.close();
+  }
+}
+export const POST = (req: NextRequest) => mutate(req, "POST");
+export const PATCH = (req: NextRequest) => mutate(req, "PATCH");
+export const DELETE = (req: NextRequest) => mutate(req, "DELETE");

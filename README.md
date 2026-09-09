@@ -1,171 +1,187 @@
 # Next 5 Priority
 
-Multi-user hierarchical project management for people and automation. It provides passwordless email-code login, admin/editor/read-only roles, unlimited nested tasks, computed parent states, permanent workflow sections, and a bearer-token bot API at `/api/v1/tasks`.
+Shared feature planning and bug tracking, with passwordless email-code login,
+admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation API.
 
-The event-sourced website every OpenClaw customer is provisioned from. It is
-not a brochure: it takes bookings, shows the owner's calendar, and gets them
-paid, and the owner's OpenClaw worker keeps it up to date.
+## Workflows
 
-## Architecture
+- **Features:** a feature backlog and an ordered Next 5 list. Move top-level
+  features between lists and move priorities up/down. The server enforces a
+  maximum of five, including concurrent requests. Subtasks move with their parent.
+- **Bugs:** separate entry and lists for P1/P2 and P3/P4. Both sort by priority
+  (P1 first) and date logged descending. Changing priority moves a bug immediately.
+  Every bug gets a permanent, incrementing `SAV-000001` style identifier; deleted
+  identifiers are never reused. Bugs are independent items; use links to connect them.
+- **States:** Needs review → Ready for development → In progress → In QA →
+  In review → Done. Any leaf can be set to any state. Features with subtasks
+  show the earliest child stage recursively; all-done children produce Done.
+  Completion does not automatically remove a feature from Next 5: move it back
+  to the backlog to free its slot. The state filter includes completed work.
+- **Details:** titles, multiline descriptions, implementor/reviewer assignments,
+  comments and attachments. Descriptions display as text in view mode and as
+  textareas when editing. Items have shareable `/?item=<id>` links; bugs also
+  accept their SAV identifier.
+- **Relationships:** connect a bug to a feature or another bug with Related to
+  or Caused by. Links appear at both ends; the opposite end of Caused by shows
+  Causes. Related to can also be added from a feature to a bug.
+- **People:** display names and two initials, with an uploaded profile photo
+  replacing initials. Administrators add teammates and manage access/API keys.
+  Readers can view, download attachments, follow, and update their own profile;
+  editors can create/edit/delete work, comment, attach files, and link items.
 
-Same shape as `inventory-shopify`: a Next.js app (frontend + API + command/query
-handlers) over a single append-only SQLite event log per site, with a background
-processor for async integration jobs. Every feature folds its state from the one
-event log (`src/lib/events.ts`).
+## Storage and migration
 
-## Auth
+`src/lib/events.ts` owns the append-only `events` table in the SQLite database
+(`DB_PATH`, default `data/site.db`). Project command handlers validate and commit
+item projections, events, and notification outbox entries in a single immediate
+transaction. State and list changes are visible as soon as the command commits.
+`project-store.ts` contains the schema, migration, and read projections;
+`project-commands.ts` contains the command handlers.
 
-The owner logs into their own site admin with the **same credentials as their
-OpenClaw** (their Rocket.Chat username and password at chat.fusenv.com). The
-admin login validates against the Rocket.Chat REST API; no separate account.
-The claw can also configure the site directly, since it holds those credentials.
+Existing installations migrate automatically once, preserving item IDs, titles,
+states, and feature nesting:
 
-## Features
+- Top 5 Priorities → Next 5 features; any excess roots move to the feature backlog.
+- Backlog, Inbox, and In QA → Feature backlog, preserving workflow states.
+- Patches → P3 bugs, receiving sequential SAV IDs in logged-date order. Nested
+  patches become independent bugs connected by Related to links.
 
-### Self-booking (`src/lib/booking.ts`) — built, tested
-Event-sourced. Events: `availability_set`, `booking_requested`, `booking_confirmed`,
-`booking_declined`, `booking_cancelled`. Visitors see open slots derived by replay
-from the owner's weekly availability; `requestBooking` folds and appends inside one
-SQLite transaction, so two visitors can never take the same slot.
+The migration records baseline item snapshots and migrated links in the event
+log. Subsequent events include complete item snapshots, comment text, relationship
+changes, attachment metadata, profile changes, and notification delivery records.
 
-A request lands as **pending** and holds its slot until the owner answers.
-**Confirmation without a password:** each booking mints a UUID confirm token
-that lives only in the event log. The owner gets `/confirm/<token>` (in the
-Rocket.Chat ping, the owner email, and on their calendar page); that page shows
-the request and two buttons. The token is the whole authorization — it is never
-returned to the visitor, so a visitor cannot confirm their own booking. GET is
-read-only (mail clients prefetch links); the decision is a POST to
-`/api/commands/confirm-booking` or `/api/commands/decline-booking`. Declining or
-cancelling frees the slot. Pre-confirmation `booking_requested` events (no token)
-fold as confirmed. See `booking.test.ts` (9 tests).
+### Attachments
 
-### Booking notifications (`src/lib/booking-notifications.ts`, `notification-processor.ts`) — built, tested
-CQRS + ES, no sends in the command path. What a booking **owes** is a pure
-function of its status (`owedNotifications`): pending → owner ping on
-Rocket.Chat (+ owner email if `site.ownerEmail` is set) carrying the confirm
-link, and a "we got your request" email to the visitor; confirmed → "you're
-booked in" email; declined → "pick another time" email. What has **gone out**
-is the replay of `notification_sent` events. The background processor delivers
-the difference, deliver-then-record, so an unconfigured or failing channel just
-stays owed and is retried — at-least-once, never silently dropped.
+Files are stored at **`data/assets/<event-id>/<attachment-id>`**, with their
+original names and metadata in the `attachments` projection and event log.
+The enclosing event ID is the ID of the create/edit/comment/profile event in the
+CQRS `events` table. `ASSETS_PATH` can override the assets directory; by default
+it is beside the SQLite database and inside the deployment's persistent data volume.
+Back up the database **and** assets together.
 
-It runs right after each booking command responds (`after()` from
-`next/server`), every 5 minutes from the in-process scheduler
-(`src/instrumentation.ts` → `scheduler.ts`; nothing external crons these
-containers, and the scheduler also fires the daily tick), and on demand via
-`POST /api/jobs/notify` / `/api/jobs/tick` (gated by `CLAW_API_KEY`). A sweep
-with nothing owed is a no-op. Channels: Rocket.Chat via the shared incoming
-webhook (`rocketchat.ts`), email over SMTP with nodemailer (`email.ts`).
-Visitor emails carry `Reply-To: ownerEmail`, so "reply to this email" actually
-reaches the owner. Visitor-typed text is HTML-escaped in email and quoted as
-data in the chat ping (the same trust boundary as the chat widget). Senders
-are injected, so the loop is tested with fakes and no network
-(`booking-notifications.test.ts`, 11 tests).
+Description and comment attachments accept any file type, up to 10 files and
+25 MB total per request. Signature-identified PNG, JPEG, GIF, and WebP images
+render inline; other types download as binary files. Profile pictures must use
+one of those image formats and be at most 5 MB. Files are served only through the
+authenticated `/api/assets/<attachment-id>` endpoint, never from `public/`.
+Failed commands roll back their data and remove newly written files. Deleting an
+item retains event-owned files for the audit trail but makes them inaccessible
+through the item download endpoint.
 
-Runtime env, all injected by the devops `deploy-openclaw-site` workflow:
-`ROCKETCHAT_WEBHOOK_URL` and `CLAW_USERNAME` (channel) from devops secrets;
-`SITE_URL` (absolute origin for links, `https://<subdomain>.fusenv.com` or the
-verified custom domain); `OWNER_EMAIL`; and the SMTP sender `SMTP_HOST`,
-`SMTP_PORT` (465 = implicit TLS), `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`. The
-deploy pulls `SITE_URL`/`OWNER_EMAIL`/SMTP just-in-time from 8examples
-(`GET /api/provisioning/site-env?claw=<claw>`, the system of record for the
-customer's Migadu mailbox), so the site mails as the business and no secret
-ever sits in a repo or a dispatch payload; with no claw/mailbox it falls back
-to the platform Gmail sender. `config.ts` carries `ownerEmail` (stamped by
-provisioning from `--email`; env overrides it) and `timeZone` for rendering
-times. `SITE_SCHEDULER=0` disables the timers.
+## Background email
 
-### Payments (`src/lib/payments.ts`) — built, tested
-Event-sourced. The owner connects their **own Stripe**; the site creates payment
-links and invoices on it and records each event; a Stripe webhook appends
-`payment_received`. Without a Stripe key the domain records a pending intent so
-the owner or their claw can finish it. See `payments.test.ts` (3 tests).
+`project-notifications.ts` consumes a durable SQLite outbox. Commands only queue
+messages; email delivery happens after the response, through Next.js `after()`,
+and every five minutes through the in-process scheduler. The worker claims a
+cross-process lease, records successful sends, and retries failed sends with
+backoff (30 seconds up to one hour). Missing configuration leaves messages owed.
+Delivery is at least once: a process crash after SMTP accepts a message but before
+the success record commits may cause a duplicate on retry.
 
-### Chat with us (`src/lib/chat.ts`) — built, tested
-The website "Chat Now" widget, with a hard security boundary. A website
-visitor is **untrusted**: their messages are recorded and relayed to the owner
-(and shown to the owner's claw only as quoted data for drafting), but they
-**never reach the claw's agent as instructions and can never trigger a tool or
-an action**. There is no code path from a visitor message to sending email,
-booking, taking a payment, or editing the site.
+Recipients:
 
-The visitor can do exactly one thing (`receiveVisitorMessage`): record a message
-and fire the relay notification. Replies flow back only through `sendReply`,
-which is owner-side, authenticated, text-only, and side-effect-free. Any real
-action the owner wants still happens in their own trusted Rocket.Chat channel,
-where they explicitly instruct the claw. This defeats prompt injection: the
-worst a hostile visitor can do is send text a human reads. See `chat.test.ts`
-(4 tests, including that an injection payload stays inert text).
+- **Assignment:** the newly assigned implementor/reviewer (one message if the
+  same person receives both roles). Saving unchanged assignments sends nothing.
+- **Comment:** the creator, current implementor, reviewer, and followers,
+  deduplicated and excluding the commenter.
+- **Follow:** a confirmation for the follower plus notifications to the creator,
+  implementor, reviewer, and current followers. Repeating Follow does not resend.
+  Unfollow stops future follower mail; already queued messages remain queued.
+- **Team access:** an invitation/access email, also queued in the background.
 
+Login codes are sent immediately through the existing authentication route.
+The scheduler and protected `POST /api/jobs/notify` and `/api/jobs/tick` endpoints
+process both project and existing booking notifications. Job requests require
+`x-claw-key: <CLAW_API_KEY>`.
 
-### Daily "did you know?" nudges (`src/lib/suggestions.ts`, `tips.ts`) — built, tested
-An education/retention engine. A scheduler hits `/api/jobs/tick` once a day;
-with a ~1 in 3 chance it fires, picks a tip at random from a big library
-(`tips.ts`), and has the owner's claw pitch it over chat ("Did you know you can
-get a business phone number for $6/mo, just ask to sign up..."). Event-sourced:
-at most one a day, never repeats a tip until the whole library is exhausted,
-then resets. Delivery is deliver-then-record (a failed send retries next day),
-gated on `ROCKETCHAT_WEBHOOK_URL`. Randomness is injected so it is fully
-testable (5 tests). Purpose: pull owners into using more of what they have, so
-they get more value and stick.
+### Devops email secret
 
-## Integrations
+The existing `8exgh/devops` `deploy-openclaw-site` workflow injects SMTP credentials
+at container runtime. It uses the customer's mailbox when available; its Gmail
+fallback reads **`GMAIL_8EXAMPLES_APP_PASSWORD`** and exposes it to the app as
+**`SMTP_PASS`**, alongside `GMAIL_8EXAMPLES_USER` as `SMTP_USER`.
+The site uses the existing `email.ts` sender. No app password belongs in this
+repository, the browser bundle, build arguments, or deployment dispatch payload.
+No additional email credential is needed for project notifications.
 
-### Google Calendar sync — first integration (planned)
-The owner's bookings show as their calendar on the site and sync to Google
-Calendar. Set up two ways: the claw configures it, or the owner logs into the
-site (Rocket.Chat creds) and connects Google. Implemented as a background job
-that, for each confirmed booking without a `gcal_synced` marker, creates a
-Google Calendar event via the Calendar API using stored OAuth tokens. Requires a
-Google OAuth client with the `calendar.events` scope (a standard sensitive scope,
-far less restricted than the admin.directory scopes) and the owner's one-time
-consent.
+Runtime configuration:
 
-## Tests
+| Variable                 | Purpose                                                                 |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `DB_PATH`                | SQLite file; the deployed container uses `/app/data/site.db`            |
+| `ASSETS_PATH`            | Optional attachment directory; default is `assets` beside the database  |
+| `OWNER_EMAIL`            | First administrator's email; defaults to `sean@besavvier.com`           |
+| `SITE_URL`               | Trusted absolute site URL for notification links; required for delivery |
+| `SMTP_HOST`, `SMTP_PORT` | SMTP server; port defaults to 465                                       |
+| `SMTP_USER`, `SMTP_PASS` | Runtime SMTP credentials from devops                                    |
+| `EMAIL_FROM`             | Sender address/display name                                             |
+| `SMTP_SECURE`            | Optional `1`/`0`; otherwise port 465 implies TLS                        |
+| `SITE_SCHEDULER`         | Set to `0` to disable in-process job timers                             |
+| `CLAW_API_KEY`           | Authorization key for background job endpoints                          |
 
-Two layers, both offline.
+The existing devops deployment mounts `/opt/<site>/data` at `/app/data`, keeping
+both the database and attachment files across image updates.
 
-`npm run test:domain` — the domain logic (`src/lib/*.test.ts`, node:test, 35
-tests). Pure folds and the notification loop with injected senders.
+## API
 
-`npm run test:e2e` — the booking flow through a real browser (Playwright,
-6 tests). It builds, then serves **the standalone output the container
-actually runs** (`.next/standalone/server.js`, static assets copied in the way
-the Dockerfile does) against local stand-ins for the only two services a live
-site talks to:
+Session cookies and `Authorization: Bearer <API_KEY>` work on `/api/project`
+and its compatibility alias `/api/v1/tasks`.
 
-- **Rocket.Chat** — an HTTP server on `:3211` recording each posted message.
-- **SMTP** — a real (small) ESMTP server on `:3212` that nodemailer
-  authenticates and delivers to, recording each message. Writing `fail` into
-  `.playwright/smtp-mode` makes it reject everything, which is how the specs
-  exercise a provider outage.
+- `GET`: `{ user, users, sections, items }`. `GET ?id=<uuid-or-SAV-id>` returns
+  `{ detail: { task, attachments, comments, followers, links } }`.
+- `POST`: create a feature or bug. Fields: `kind` (`feature`/`bug`), `title`,
+  `description`, `state`, `implementorId`, `reviewerId`, feature `sectionId`
+  (`feature-backlog`/`next-five`), optional feature `parentId`, or bug `priority`.
+  Defaults: feature, backlog, Needs review, and P3 for bugs.
+- `PATCH`: supply `id` and changed fields. Set a root feature's `sectionId` to
+  move it; set its zero-based `position` to reorder within Next 5. Set assignment
+  fields to `null` to unassign. A bug's section is always derived from its priority.
+- `POST { action: "comment", id, body }`: add a comment and/or attachments.
+- `POST { action: "follow", id, follow: true|false }`: personal accounts only.
+- `POST { action: "link", id, targetId, relation: "related_to"|"caused_by" }`.
+- `POST { action: "unlink", id, linkId }`.
+- `DELETE ?id=<id>`: delete the item and its feature descendants.
+- `PATCH /api/profile`: `name`, optional `removeAvatar: true`, and optional photo;
+  applies only to the signed-in user.
 
-Nothing reaches the network, and the site is configured with the same env var
-names the devops deploy uses. The specs assert on what the mocks *received* —
-decoded subjects and bodies, not stub call counts — covering: a visitor
-booking and the owner confirming from their link; declining freeing the time;
-that loading the confirm link decides nothing (mail clients prefetch URLs) and
-a second answer is refused; a time taken while the form was open; a mail
-outage leaving the message owed and the next sweep delivering it without
-repeating the chat ping; and the job endpoints refusing an unauthenticated
-call. Config and ports live in `tests/e2e/e2e.config.json`.
+For files, send multipart form data with a `data` field containing the JSON
+command and repeated `files` fields. Description files accompany POST create or
+PATCH edit; comment files accompany POST comment; profile photos accompany PATCH
+profile. Otherwise send JSON. Errors return `{ error }` with 400 for validation,
+401 for missing authentication, 403 for permissions, 404 for missing items,
+409 for capacity/conflicts, and 413 for oversized uploads.
 
-Both suites are run by hand today; neither is wired into CI.
+## Development and checks
 
-## Status
+```sh
+npm ci
+npm run dev
+npm run test:domain
+npm run build
+npm run test:e2e
+```
 
-- All domain tests: `npm run test:domain` (runs every `src/lib/*.test.ts`).
-- Browser end-to-end: `npm run test:e2e` (needs Chromium; set
-  `PLAYWRIGHT_CHROMIUM_PATH` if it is not at `/snap/bin/chromium`).
-- Booking domain + confirm flow + notifications: built and tested.
-- Payments domain: built and tested.
-- Next: Next.js app shell, public booking page, admin (Rocket.Chat auth,
-  availability, calendar, connect-Stripe, connect-Google), the Google Calendar
-  sync processor, and the provisioning that stamps out one of these per customer.
+The domain suite covers migrations, workflow invariants, priority/ID allocation,
+relationships, attachments and rollback, permissions, and notification retry
+behavior alongside existing booking/payment/chat tests.
 
-## Provisioning (open decisions)
+Browser tests run the production standalone build with local SMTP and Rocket.Chat
+mocks. No test mail reaches real recipients. The project specs cover login,
+feature ordering/capacity, bug triage, details, attachments, links, notifications,
+profiles, read-only authorization, and mobile layout. Booking regression specs
+exercise the original booking module at `/book`.
 
-How each customer's copy is deployed is still to be decided with Sean: Cloudflare
-Pages vs per-customer containers for hosting, and a GitHub App vs per-repo PAT for
-letting each claw edit its own site. The app code above is independent of that
-choice.
+Chromium must be installed. Set `PLAYWRIGHT_CHROMIUM_PATH` to its executable
+when it is not at `/snap/bin/chromium`. To run just the project browser suite
+against an existing production build:
+
+```sh
+npx playwright test tests/e2e/project.spec.ts
+```
+
+## Existing site modules
+
+The OpenClaw template's booking/calendar, payments, chat, and suggestion domain
+modules share the event log. Booking uses private confirmation links and async
+SMTP/Rocket.Chat notifications; chat visitor messages remain untrusted data.
+Their domain tests and booking browser regression tests are retained.

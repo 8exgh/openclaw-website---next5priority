@@ -8,19 +8,32 @@ import Database from "better-sqlite3";
 
 const root = path.resolve(process.cwd());
 export const E2E = JSON.parse(
-  fs.readFileSync(path.join(root, "tests/e2e/e2e.config.json"), "utf8")
+  fs.readFileSync(path.join(root, "tests/e2e/e2e.config.json"), "utf8"),
 ) as {
-  host: string; port: number; webhookPort: number; smtpPort: number;
-  artifactDir: string; dbFile: string; webhookLog: string; mailLog: string;
-  smtpModeFile: string; clawKey: string; claw: string; ownerEmail: string;
-  smtpUser: string; emailFrom: string; timeZone: string;
+  host: string;
+  port: number;
+  webhookPort: number;
+  smtpPort: number;
+  artifactDir: string;
+  dbFile: string;
+  webhookLog: string;
+  mailLog: string;
+  smtpModeFile: string;
+  clawKey: string;
+  claw: string;
+  ownerEmail: string;
+  smtpUser: string;
+  emailFrom: string;
+  timeZone: string;
 };
 export const BASE_URL = `http://${E2E.host}:${E2E.port}`;
 
 /* Read from the site's own config so the suite travels between customer
    sites unchanged; the emails quote whatever this repo is branded as. */
 export const BUSINESS_NAME =
-  /businessName:\s*"([^"]*)"/.exec(fs.readFileSync(path.join(root, "src/lib/config.ts"), "utf8"))?.[1] ?? "";
+  /businessName:\s*"([^"]*)"/.exec(
+    fs.readFileSync(path.join(root, "src/lib/config.ts"), "utf8"),
+  )?.[1] ?? "";
 
 const abs = (p: string) => path.join(root, p);
 
@@ -35,39 +48,61 @@ function readLines<T>(file: string): T[] {
 
 /* --- Rocket.Chat ------------------------------------------------------ */
 
-export type ChatPost = { url: string; body: { text: string; alias?: string; channel?: string } };
+export type ChatPost = {
+  url: string;
+  body: { text: string; alias?: string; channel?: string };
+};
 
 export const chatPosts = (): ChatPost[] => readLines<ChatPost>(E2E.webhookLog);
 
 /* --- Email ------------------------------------------------------------ */
 
 export type Mail = {
-  to: string; from: string; replyTo: string; subject: string; text: string; html: string; raw: string;
+  to: string;
+  from: string;
+  replyTo: string;
+  subject: string;
+  text: string;
+  html: string;
+  raw: string;
 };
 
 function decodeQuotedPrintable(s: string): string {
   return s
     .replace(/=(?:\r?\n)/g, "")
-    .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, h) =>
+      String.fromCharCode(parseInt(h, 16)),
+    );
 }
 
 /* RFC 2047 encoded-words, as used for a long or non-ASCII Subject. */
 function decodeWords(s: string): string {
-  return s.replace(/=\?[^?]+\?([QqBb])\?([^?]*)\?=/g, (_, enc: string, text: string) =>
-    enc.toUpperCase() === "B"
-      ? Buffer.from(text, "base64").toString("utf8")
-      : decodeQuotedPrintable(text.replace(/_/g, " "))
-  );
+  return s
+    .replace(/(\?=)\s+(?==\?)/g, "$1")
+    .replace(
+      /=\?[^?]+\?([QqBb])\?([^?]*)\?=/g,
+      (_, enc: string, text: string) =>
+        enc.toUpperCase() === "B"
+          ? Buffer.from(text, "base64").toString("utf8")
+          : Buffer.from(
+              decodeQuotedPrintable(text.replace(/_/g, " ")),
+              "latin1",
+            ).toString("utf8"),
+    );
 }
 
 function decodeBody(body: string, encoding: string): string {
   const e = encoding.toLowerCase();
   if (e === "quoted-printable") return decodeQuotedPrintable(body);
-  if (e === "base64") return Buffer.from(body.replace(/\s+/g, ""), "base64").toString("utf8");
+  if (e === "base64")
+    return Buffer.from(body.replace(/\s+/g, ""), "base64").toString("utf8");
   return body;
 }
 
-function splitMessage(raw: string): { headers: Map<string, string>; body: string } {
+function splitMessage(raw: string): {
+  headers: Map<string, string>;
+  body: string;
+} {
   const at = raw.indexOf("\n\n");
   // Unfold continuation lines in the headers only, so a folded Subject reads
   // as one line. The body must stay byte-exact: unfolding it would turn a
@@ -77,7 +112,11 @@ function splitMessage(raw: string): { headers: Map<string, string>; body: string
   const headers = new Map<string, string>();
   for (const line of head.split("\n")) {
     const c = line.indexOf(":");
-    if (c > 0) headers.set(line.slice(0, c).trim().toLowerCase(), line.slice(c + 1).trim());
+    if (c > 0)
+      headers.set(
+        line.slice(0, c).trim().toLowerCase(),
+        line.slice(c + 1).trim(),
+      );
   }
   return { headers, body };
 }
@@ -89,8 +128,13 @@ function parts(raw: string): { text: string; html: string } {
   const contentType = headers.get("content-type") ?? "";
   const boundary = /boundary="?([^";]+)"?/i.exec(contentType)?.[1];
   if (!boundary) {
-    const decoded = decodeBody(body, headers.get("content-transfer-encoding") ?? "");
-    return contentType.includes("text/html") ? { text: "", html: decoded } : { text: decoded, html: "" };
+    const decoded = decodeBody(
+      body,
+      headers.get("content-transfer-encoding") ?? "",
+    );
+    return contentType.includes("text/html")
+      ? { text: "", html: decoded }
+      : { text: decoded, html: "" };
   }
   const out = { text: "", html: "" };
   for (const chunk of body.split(`--${boundary}`)) {
@@ -98,7 +142,10 @@ function parts(raw: string): { text: string; html: string } {
     if (!trimmed || trimmed.startsWith("--")) continue;
     const sub = splitMessage(trimmed);
     const type = sub.headers.get("content-type") ?? "";
-    const decoded = decodeBody(sub.body, sub.headers.get("content-transfer-encoding") ?? "");
+    const decoded = decodeBody(
+      sub.body,
+      sub.headers.get("content-transfer-encoding") ?? "",
+    );
     if (type.includes("text/html")) out.html = decoded;
     else if (type.includes("text/plain")) out.text = decoded;
     else if (type.includes("multipart/")) {
@@ -126,7 +173,8 @@ export function mails(): Mail[] {
   });
 }
 
-export const mailsTo = (address: string): Mail[] => mails().filter((m) => m.to === address);
+export const mailsTo = (address: string): Mail[] =>
+  mails().filter((m) => m.to === address);
 
 /* --- Per-test state --------------------------------------------------- */
 
@@ -156,8 +204,15 @@ export function events(): { type: string; data: Record<string, unknown> }[] {
   if (!fs.existsSync(file)) return [];
   const db = new Database(file, { readonly: true });
   try {
-    return (db.prepare("SELECT type, data FROM events ORDER BY rowid").all() as { type: string; data: string }[])
-      .map((r) => ({ type: r.type, data: JSON.parse(r.data) as Record<string, unknown> }));
+    return (
+      db.prepare("SELECT type, data FROM events ORDER BY rowid").all() as {
+        type: string;
+        data: string;
+      }[]
+    ).map((r) => ({
+      type: r.type,
+      data: JSON.parse(r.data) as Record<string, unknown>,
+    }));
   } catch {
     return [];
   } finally {
