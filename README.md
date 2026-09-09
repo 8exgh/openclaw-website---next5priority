@@ -17,6 +17,11 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   show the earliest child stage recursively; all-done children produce Done.
   Completion does not automatically remove a feature from Next 5: move it back
   to the backlog to free its slot. The state filter includes completed work.
+- **Kanban:** six columns from Needs review through Done, combining the Next 5
+  features with P1/P2 bugs. Editors move leaf cards by dragging or selecting a
+  state; parent features follow their subtasks. Done shows features and P1/P2
+  bugs completed within the last 28 days, including completed features moved
+  back to the backlog. Older completed items remain accessible in the lists.
 - **Details:** titles, multiline descriptions, implementor/reviewer assignments,
   comments and attachments. Descriptions display as text in view mode and as
   textareas when editing. Items have shareable `/?item=<id>` links; bugs also
@@ -49,6 +54,13 @@ states, and feature nesting:
 The migration records baseline item snapshots and migrated links in the event
 log. Subsequent events include complete item snapshots, comment text, relationship
 changes, attachment metadata, profile changes, and notification delivery records.
+
+Completion dates are stored separately from edit dates. Reopening clears the
+completion date; completing again starts a new 28-day window. Comments and other
+edits do not extend that window. Completed parent features use their latest child
+completion date. Existing completion dates are recovered from state transitions
+in the event log, with the item's last edit date as a fallback when history is
+unavailable.
 
 ### Attachments
 
@@ -170,6 +182,8 @@ mocks. No test mail reaches real recipients. The project specs cover login,
 feature ordering/capacity, bug triage, details, attachments, links, notifications,
 profiles, read-only authorization, and mobile layout. Booking regression specs
 exercise the original booking module at `/book`.
+Kanban checks cover scope, completion cutoffs, state changes, drag-and-drop,
+parent rollups, and mobile scrolling.
 
 Chromium must be installed. Set `PLAYWRIGHT_CHROMIUM_PATH` to its executable
 when it is not at `/snap/bin/chromium`. To run just the project browser suite

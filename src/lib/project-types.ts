@@ -54,6 +54,7 @@ export type Task = {
   position: number;
   createdAt: string;
   updatedAt: string;
+  completedAt: string | null;
   leaf: boolean;
   children: Task[];
 };

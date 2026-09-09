@@ -9,6 +9,7 @@ import {
   type Task,
   type User,
 } from "../lib/project-types";
+import { Kanban } from "./components/kanban";
 import { Admin, Login, Profile } from "./components/account";
 import { NewItem } from "./components/item-form";
 import { ItemView } from "./components/item-detail";
@@ -154,7 +155,7 @@ export function ProjectApp() {
   const [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<ItemKind>("feature"),
+  const [tab, setTab] = useState<ItemKind | "kanban">("feature"),
     [search, setSearch] = useState(""),
     [stateFilter, setStateFilter] = useState("");
   const [admin, setAdmin] = useState(false),
@@ -193,7 +194,7 @@ export function ProjectApp() {
   const open = (id: string | null) => {
     setSelected(id);
     const item = items.find((item) => item.id === id || item.publicId === id);
-    if (item) setTab(item.kind);
+    if (item && tab !== "kanban") setTab(item.kind);
     const url = new URL(window.location.href);
     if (id) url.searchParams.set("item", id);
     else url.searchParams.delete("item");
@@ -288,33 +289,42 @@ export function ProjectApp() {
           </button>
         </div>
       </header>
-      <main className="board">
+      <main className={`board${tab === "kanban" ? " board-kanban" : ""}`}>
         <section className="hero">
           <div>
             <p className="eyebrow">
-              {tab === "feature"
-                ? "PLAN WITH PURPOSE"
-                : "KEEP QUALITY IN FOCUS"}
+              {tab === "kanban"
+                ? "THE WORK IN MOTION"
+                : tab === "feature"
+                  ? "PLAN WITH PURPOSE"
+                  : "KEEP QUALITY IN FOCUS"}
             </p>
             <h1>
-              {tab === "feature"
-                ? "Make the next five count."
-                : "Every bug, in its place."}
+              {tab === "kanban"
+                ? "Keep the work moving."
+                : tab === "feature"
+                  ? "Make the next five count."
+                  : "Every bug, in its place."}
             </h1>
             <p>
-              {tab === "feature"
-                ? "Choose five features to focus on. Keep everything else in the backlog, ready for its turn."
-                : "Triage by priority. Track the fix from first report to final review."}
+              {tab === "kanban"
+                ? "Your next five features and urgent bugs, from first review to done."
+                : tab === "feature"
+                  ? "Choose five features to focus on. Keep everything else in the backlog, ready for its turn."
+                  : "Triage by priority. Track the fix from first report to final review."}
             </p>
           </div>
           {canEdit && (
             <button
               className="primary new-item-button"
               onClick={() =>
-                setCreating({ kind: tab, sectionId: "feature-backlog" })
+                setCreating({
+                  kind: tab === "bug" ? "bug" : "feature",
+                  sectionId: "feature-backlog",
+                })
               }
             >
-              ＋ {tab === "feature" ? "New feature" : "Report a bug"}
+              ＋ {tab === "bug" ? "Report a bug" : "New feature"}
             </button>
           )}
         </section>
@@ -340,6 +350,16 @@ export function ProjectApp() {
             >
               Bugs <span>{bugs}</span>
             </button>
+            <button
+              aria-pressed={tab === "kanban"}
+              onClick={() => {
+                setTab("kanban");
+                setSearch("");
+                setStateFilter("");
+              }}
+            >
+              Kanban
+            </button>
           </nav>
           <div className="board-filters">
             <input
@@ -348,7 +368,11 @@ export function ProjectApp() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={
-                tab === "bug" ? "Search bugs or SAV ID…" : "Search features…"
+                tab === "kanban"
+                  ? "Search priority work…"
+                  : tab === "bug"
+                    ? "Search bugs or SAV ID…"
+                    : "Search features…"
               }
             />
             <select
@@ -366,96 +390,114 @@ export function ProjectApp() {
           </div>
         </div>
         <ErrorNotice error={error} />
-        <div className={`section-grid ${tab}-grid`}>
-          {visible.map((section) => {
-            const tasks = section.tasks.filter(matching);
-            return (
-              <section
-                className="project-section"
-                key={section.id}
-                aria-label={section.name}
-              >
-                <div className="section-head">
-                  <div>
-                    <h2>{section.name}</h2>
-                    <p>
-                      {section.id === "next-five"
-                        ? "Ordered by focus · move features up or down"
-                        : section.id === "feature-backlog"
-                          ? "Good ideas, waiting for their turn"
-                          : "Priority first, then newest report"}
-                    </p>
-                  </div>
-                  <span className="section-count">
-                    {section.id === "next-five"
-                      ? `${section.tasks.length} / 5`
-                      : section.tasks.length}
-                  </span>
-                </div>
-                <div className="tasks">
-                  {tasks.length ? (
-                    tasks.map((task) => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        users={users}
-                        canEdit={canEdit}
-                        open={open}
-                        patch={patch}
-                        count={section.tasks.length}
-                        busy={busy}
-                      />
-                    ))
-                  ) : (
-                    <div className="empty">
-                      <span className="empty-symbol">
-                        {tab === "feature" ? "◇" : "✓"}
-                      </span>
+        {tab === "kanban" ? (
+          <Kanban
+            items={items}
+            users={users}
+            canEdit={canEdit}
+            busy={busy}
+            search={search}
+            stateFilter={stateFilter}
+            open={open}
+            patch={patch}
+          />
+        ) : (
+          <div className={`section-grid ${tab}-grid`}>
+            {visible.map((section) => {
+              const tasks = section.tasks.filter(matching);
+              return (
+                <section
+                  className="project-section"
+                  key={section.id}
+                  aria-label={section.name}
+                >
+                  <div className="section-head">
+                    <div>
+                      <h2>{section.name}</h2>
                       <p>
-                        {search || stateFilter
-                          ? "No matching items."
-                          : section.id === "next-five"
-                            ? "Your next five start here."
-                            : tab === "bug"
-                              ? "No bugs in this priority group."
-                              : "Room for your next idea."}
+                        {section.id === "next-five"
+                          ? "Ordered by focus · move features up or down"
+                          : section.id === "feature-backlog"
+                            ? "Good ideas, waiting for their turn"
+                            : "Priority first, then newest report"}
                       </p>
-                      <span>
-                        {section.id === "next-five" && !search && !stateFilter
-                          ? "Move a feature from the backlog, or add one below."
-                          : ""}
-                      </span>
+                    </div>
+                    <span className="section-count">
+                      {section.id === "next-five"
+                        ? `${section.tasks.length} / 5`
+                        : section.tasks.length}
+                    </span>
+                  </div>
+                  <div className="tasks">
+                    {tasks.length ? (
+                      tasks.map((task) => (
+                        <TaskRow
+                          key={task.id}
+                          task={task}
+                          users={users}
+                          canEdit={canEdit}
+                          open={open}
+                          patch={patch}
+                          count={section.tasks.length}
+                          busy={busy}
+                        />
+                      ))
+                    ) : (
+                      <div className="empty">
+                        <span className="empty-symbol">
+                          {tab === "feature" ? "◇" : "✓"}
+                        </span>
+                        <p>
+                          {search || stateFilter
+                            ? "No matching items."
+                            : section.id === "next-five"
+                              ? "Your next five start here."
+                              : tab === "bug"
+                                ? "No bugs in this priority group."
+                                : "Room for your next idea."}
+                        </p>
+                        <span>
+                          {section.id === "next-five" && !search && !stateFilter
+                            ? "Move a feature from the backlog, or add one below."
+                            : ""}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {canEdit && tab === "feature" && (
+                    <div className="section-footer">
+                      <button
+                        disabled={
+                          busy ||
+                          (section.id === "next-five" &&
+                            section.tasks.length >= 5)
+                        }
+                        onClick={() =>
+                          setCreating({
+                            kind: "feature",
+                            sectionId: section.id,
+                          })
+                        }
+                      >
+                        ＋ Add feature
+                      </button>
+                      {section.id === "next-five" &&
+                        section.tasks.length >= 5 && (
+                          <span>All five spots are filled.</span>
+                        )}
                     </div>
                   )}
-                </div>
-                {canEdit && tab === "feature" && (
-                  <div className="section-footer">
-                    <button
-                      disabled={
-                        busy ||
-                        (section.id === "next-five" &&
-                          section.tasks.length >= 5)
-                      }
-                      onClick={() =>
-                        setCreating({ kind: "feature", sectionId: section.id })
-                      }
-                    >
-                      ＋ Add feature
-                    </button>
-                    {section.id === "next-five" &&
-                      section.tasks.length >= 5 && (
-                        <span>All five spots are filled.</span>
-                      )}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
         <p className="board-footnote">
-          {tab === "feature"
-            ? "Subtasks move with their parent. Parent states reflect the earliest unfinished stage beneath them."
-            : "Changing a bug’s priority automatically places it in the correct list."}
+          {tab === "kanban"
+            ? "Completed cards stay visible for 28 days from completion. Earlier work remains available in Features and Bugs."
+            : tab === "feature"
+              ? "Subtasks move with their parent. Parent states reflect the earliest unfinished stage beneath them."
+              : "Changing a bug’s priority automatically places it in the correct list."}
         </p>
       </main>
       {selected && !creating && (

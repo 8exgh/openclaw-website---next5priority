@@ -527,3 +527,140 @@ test("profile photos replace initials and read-only access protects work and att
     ).status(),
   ).toBe(403);
 });
+
+test("Kanban combines priorities, moves cards, and keeps only four weeks of Done", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1800, height: 1000 });
+  await login(page);
+  const feature = await create(page, {
+    title: "Priority feature",
+    sectionId: "next-five",
+  });
+  const highBug = await create(page, {
+    title: "Urgent bug",
+    kind: "bug",
+    priority: "P1",
+    state: "in_qa",
+  });
+  const parent = await create(page, {
+    title: "Feature with subtasks",
+    sectionId: "next-five",
+  });
+  await create(page, { title: "Nested work", parentId: parent.id });
+  await create(page, { title: "Waiting in backlog" });
+  await create(page, {
+    title: "Lower priority bug",
+    kind: "bug",
+    priority: "P3",
+  });
+  const recentFeature = await create(page, {
+    title: "Recently shipped feature",
+    state: "done",
+  });
+  const oldFeature = await create(page, {
+    title: "Old completed feature",
+    state: "done",
+  });
+  const oldBug = await create(page, {
+    title: "Old completed bug",
+    kind: "bug",
+    priority: "P2",
+    state: "done",
+  });
+  const connection = db();
+  const old = new Date(Date.now() - 29 * 86400000).toISOString();
+  for (const item of [oldFeature, oldBug])
+    connection
+      .prepare("UPDATE tasks SET completed_at=? WHERE id=?")
+      .run(old, item.id);
+  connection.close();
+  await page.reload();
+  await page.getByRole("button", { name: "Kanban", exact: true }).click();
+  const board = page.getByRole("region", { name: "Kanban board", exact: true });
+  await expect(board.getByRole("region")).toHaveCount(6);
+  await expect(
+    board.getByRole("button", { name: feature.title, exact: true }),
+  ).toBeVisible();
+  await expect(
+    board.getByRole("button", { name: highBug.title, exact: true }),
+  ).toBeVisible();
+  await expect(
+    board.getByRole("button", { name: recentFeature.title, exact: true }),
+  ).toBeVisible();
+  for (const title of [
+    "Waiting in backlog",
+    "Lower priority bug",
+    "Nested work",
+    oldFeature.title,
+    oldBug.title,
+  ])
+    await expect(
+      board.getByRole("button", { name: title, exact: true }),
+    ).toHaveCount(0);
+  await expect(
+    board.getByLabel(`State for ${parent.title}`, { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    board.getByRole("article", { name: parent.title, exact: true }),
+  ).toContainText("1 subtask · state follows subtasks");
+  await board
+    .getByLabel(`State for ${feature.title}`, { exact: true })
+    .selectOption("in_progress");
+  await expect(
+    board.getByRole("region", { name: "In progress column", exact: true }),
+  ).toContainText(feature.title);
+  await board
+    .getByRole("article", { name: feature.title, exact: true })
+    .dragTo(board.getByRole("region", { name: "Done column", exact: true }), {
+      sourcePosition: { x: 10, y: 10 },
+    });
+  await expect(
+    board.getByRole("region", { name: "Done column", exact: true }),
+  ).toContainText(feature.title);
+  const result = await page.request.get(`/api/project?id=${feature.id}`, {
+    headers: await sessionHeaders(page),
+  });
+  expect((await result.json()).detail.task.completedAt).toBeTruthy();
+  await board.getByRole("button", { name: feature.title, exact: true }).click();
+  await expect(
+    dialog(page).getByRole("heading", { name: feature.title, exact: true }),
+  ).toBeVisible();
+  await close(page);
+  await expect(board).toBeVisible();
+  await page.request.patch("/api/project", {
+    headers: await sessionHeaders(page),
+    data: { id: oldBug.id, description: "Metadata changed today" },
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Kanban", exact: true }).click();
+  await expect(
+    board.getByRole("button", { name: oldBug.title, exact: true }),
+  ).toHaveCount(0);
+  await board.evaluate((element) => {
+    element.scrollLeft = 0;
+  });
+  await page.screenshot({
+    path: ".playwright/kanban-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+  expect(
+    await board.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBeTruthy();
+  await page.screenshot({
+    path: ".playwright/kanban-mobile.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: /^Features/ }).click();
+  await expect(
+    page.getByRole("button", { name: oldFeature.title, exact: true }),
+  ).toBeVisible();
+});

@@ -176,7 +176,7 @@ export function createItem(
       )
       .get(sectionId, parent?.id ?? null) as { position: number };
     db.prepare(
-      `INSERT INTO tasks (id,section_id,parent_id,title,state,position,created_at,updated_at,kind,description,public_id,priority,implementor_id,reviewer_id,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO tasks (id,section_id,parent_id,title,state,position,created_at,updated_at,kind,description,public_id,priority,implementor_id,reviewer_id,created_by,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       id,
       sectionId,
@@ -193,6 +193,7 @@ export function createItem(
       implementorId,
       reviewerId,
       actor.id,
+      state === "done" ? now : null,
     );
     const task = ownTask(db, id)!;
     const eventId = appendEvent(db, "item_created", { task, by: actor.id });
@@ -286,8 +287,14 @@ export function updateItem(
       moveTree(db, task.id, task.sectionId);
     }
     task.updatedAt = new Date().toISOString();
+    task.completedAt =
+      task.state === "done"
+        ? old.state === "done"
+          ? old.completedAt
+          : task.updatedAt
+        : null;
     db.prepare(
-      "UPDATE tasks SET title=?,description=?,state=?,priority=?,implementor_id=?,reviewer_id=?,section_id=?,position=?,updated_at=? WHERE id=?",
+      "UPDATE tasks SET title=?,description=?,state=?,priority=?,implementor_id=?,reviewer_id=?,section_id=?,position=?,updated_at=?,completed_at=? WHERE id=?",
     ).run(
       task.title,
       task.description,
@@ -298,6 +305,7 @@ export function updateItem(
       task.sectionId,
       task.position,
       task.updatedAt,
+      task.completedAt,
       task.id,
     );
     if (input.position !== undefined) {

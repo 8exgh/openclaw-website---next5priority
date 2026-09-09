@@ -16,7 +16,11 @@ import {
 } from "./project-types.ts";
 export type { Role, TaskState, User } from "./project-types.ts";
 
-export const TASK_SELECT = `SELECT id,public_id publicId,kind,section_id sectionId,parent_id parentId,title,description,state,state ownState,priority,implementor_id implementorId,reviewer_id reviewerId,created_by createdBy,position,created_at createdAt,updated_at updatedAt FROM tasks`;
+const BASE_TASK_SELECT = `SELECT id,public_id publicId,kind,section_id sectionId,parent_id parentId,title,description,state,state ownState,priority,implementor_id implementorId,reviewer_id reviewerId,created_by createdBy,position,created_at createdAt,updated_at updatedAt FROM tasks`;
+export const TASK_SELECT = BASE_TASK_SELECT.replace(
+  " FROM tasks",
+  ",completed_at completedAt FROM tasks",
+);
 export const USER_SELECT =
   "SELECT id,email,role,name,avatar_id avatarId FROM users";
 export const ATTACHMENT_SELECT =
@@ -137,9 +141,52 @@ export function projectDb(dbPath?: string) {
       appendEvent(db, "items_linked", { link, by: "migration" });
     // Old commands did not contain complete item snapshots. Record a baseline
     // once so migrated content is also represented in the CQRS event history.
-    for (const task of db.prepare(TASK_SELECT).all())
+    for (const task of db.prepare(BASE_TASK_SELECT).all())
       appendEvent(db, "item_migrated", { task });
     db.prepare("INSERT INTO project_migrations VALUES (1)").run();
+  }).immediate();
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM project_migrations WHERE version=2").get())
+      return;
+    db.exec("ALTER TABLE tasks ADD COLUMN completed_at TEXT");
+    // Recover the transition into Done, ignoring later title edits/comments.
+    const history = new Map<
+      string,
+      { state: TaskState; completedAt: string | null }
+    >();
+    const events = db
+      .prepare(
+        "SELECT type,data,timestamp FROM events WHERE type IN ('task_created','task_updated','item_migrated','item_created','item_updated') ORDER BY rowid",
+      )
+      .all() as { type: string; data: string; timestamp: string }[];
+    for (const event of events) {
+      const data = JSON.parse(event.data);
+      const row = data.task || data;
+      const id = row.id;
+      const state =
+        row.ownState ||
+        row.state ||
+        (event.type === "task_created" ? "in_progress" : undefined);
+      if (!id || !STATES.includes(state)) continue;
+      const previous = history.get(id);
+      const completedAt =
+        state === "done"
+          ? previous?.state === "done"
+            ? previous.completedAt
+            : row.updatedAt || event.timestamp
+          : null;
+      history.set(id, { state, completedAt });
+    }
+    const completed = db
+      .prepare("SELECT id,updated_at updatedAt FROM tasks WHERE state='done'")
+      .all() as { id: string; updatedAt: string }[];
+    for (const task of completed) {
+      db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(
+        history.get(task.id)?.completedAt || task.updatedAt,
+        task.id,
+      );
+    }
+    db.prepare("INSERT INTO project_migrations VALUES (2)").run();
   }).immediate();
   return db;
 }
@@ -246,14 +293,25 @@ export function allTasks(db: Database.Database): Task[] {
       children.set(row.parentId, [...(children.get(row.parentId) || []), row]);
   const build = (row: Task): Task => {
     const nested = (children.get(row.id) || []).map(build);
+    const state = aggregate(
+      nested.map((c) => c.state),
+      row.ownState,
+    );
+    const completedAt =
+      state !== "done"
+        ? null
+        : nested.length
+          ? nested
+              .map((c) => c.completedAt || c.updatedAt)
+              .sort()
+              .at(-1) || null
+          : row.completedAt;
     return {
       ...row,
+      completedAt,
       children: nested,
       leaf: !nested.length,
-      state: aggregate(
-        nested.map((c) => c.state),
-        row.ownState,
-      ),
+      state,
     };
   };
   const roots = rows.filter((r) => !r.parentId).map(build);
