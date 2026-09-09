@@ -99,7 +99,21 @@ test("features stay separate; next five can reorder and move with capacity enfor
   await dialog(page)
     .getByRole("textbox", { name: "Description", exact: true })
     .fill("Show recent activity.\nKeep the layout simple.");
+  await dialog(page)
+    .getByRole("combobox", { name: "Priority", exact: true })
+    .selectOption("P1");
   await dialog(page).getByRole("button", { name: "Create feature" }).click();
+  await expect(dialog(page).locator(".detail-toolbar .priority")).toHaveText(
+    "P1",
+  );
+  await dialog(page).getByRole("button", { name: "Edit item" }).click();
+  await dialog(page)
+    .getByRole("combobox", { name: "Priority", exact: true })
+    .selectOption("P2");
+  await dialog(page).getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog(page).locator(".detail-toolbar .priority")).toHaveText(
+    "P2",
+  );
   await expect(
     dialog(page).getByText("Show recent activity.\nKeep the layout simple.", {
       exact: true,
@@ -121,6 +135,12 @@ test("features stay separate; next five can reorder and move with capacity enfor
   });
   await page.reload();
   const next = page.getByRole("region", { name: "Next 5 features" });
+  await expect(
+    next.getByLabel("Priority for Customer dashboard", { exact: true }),
+  ).toHaveValue("P2");
+  await next
+    .getByLabel("Priority for Customer dashboard", { exact: true })
+    .selectOption("P4");
   await expect(next.getByText("5 / 5")).toBeVisible();
   await expect(page.getByText(bug.title, { exact: true })).toHaveCount(0);
   await expect(
@@ -184,7 +204,10 @@ test("features stay separate; next five can reorder and move with capacity enfor
     dialog(page).getByRole("heading", { name: "Dashboard API" }),
   ).toBeVisible();
   await close(page);
-  await backlog.getByRole("button", { name: /Customer dashboard/ }).click();
+  await backlog
+    .locator(".task-title")
+    .filter({ hasText: "Customer dashboard" })
+    .click();
   await expect(dialog(page).locator(".detail-toolbar .status")).toHaveText(
     "In review",
   );
@@ -485,6 +508,17 @@ test("profile photos replace initials and read-only access protects work and att
     dialog(readerPage).getByRole("button", { name: "Edit item" }),
   ).toHaveCount(0);
   await expect(
+    dialog(readerPage).getByRole("button", { name: "Convert to bug" }),
+  ).toHaveCount(0);
+  expect(
+    (
+      await readerPage.request.post("/api/project", {
+        headers: await sessionHeaders(readerPage),
+        data: { action: "convert", id: task.id, kind: "bug" },
+      })
+    ).status(),
+  ).toBe(403);
+  await expect(
     dialog(readerPage).getByRole("textbox", {
       name: "Add a comment",
       exact: true,
@@ -583,6 +617,11 @@ test("Kanban combines priorities, moves cards, and keeps only four weeks of Done
     board.getByRole("button", { name: feature.title, exact: true }),
   ).toBeVisible();
   await expect(
+    board
+      .getByRole("article", { name: feature.title, exact: true })
+      .locator(".priority"),
+  ).toHaveText("P3");
+  await expect(
     board.getByRole("button", { name: highBug.title, exact: true }),
   ).toBeVisible();
   await expect(
@@ -663,4 +702,210 @@ test("Kanban combines priorities, moves cards, and keeps only four weeks of Done
   await expect(
     page.getByRole("button", { name: oldFeature.title, exact: true }),
   ).toBeVisible();
+});
+
+test("features convert to bugs and back while preserving subtasks, collaboration, and priority", async ({
+  page,
+}) => {
+  await login(page);
+  const task = await create(page, {
+    title: "Reclassify export",
+    description: "Keep the requirements",
+    priority: "P2",
+    sectionId: "next-five",
+  });
+  const child = await create(page, {
+    title: "Export follow-up",
+    parentId: task.id,
+    state: "in_review",
+  });
+  await page.goto(`/?item=${task.id}`);
+  await expect(
+    dialog(page).getByRole("heading", { name: task.title, exact: true }),
+  ).toBeVisible();
+  await dialog(page)
+    .getByLabel("Add a comment", { exact: true })
+    .fill("Keep this discussion");
+  await dialog(page)
+    .getByLabel("Attach files", { exact: true })
+    .setInputFiles([
+      { name: "conversion.png", mimeType: "image/png", buffer: png },
+    ]);
+  await dialog(page).getByRole("button", { name: "Post comment" }).click();
+  await expect(
+    dialog(page).getByText("Keep this discussion", { exact: true }),
+  ).toBeVisible();
+  await dialog(page)
+    .getByRole("button", { name: "+ Follow", exact: true })
+    .click();
+  await expect(
+    dialog(page).getByRole("button", { name: "✓ Following", exact: true }),
+  ).toBeVisible();
+  await dialog(page)
+    .getByRole("button", { name: "Convert to bug", exact: true })
+    .click();
+  await expect(
+    dialog(page).getByRole("button", {
+      name: "Convert to feature",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(dialog(page).locator(".detail-toolbar .priority")).toHaveText(
+    "P2",
+  );
+  await expect(dialog(page).locator(".detail-toolbar .status")).toHaveText(
+    "In review",
+  );
+  await expect(
+    dialog(page).getByRole("img", { name: "conversion.png", exact: true }),
+  ).toBeVisible();
+  const read = async () =>
+    (
+      await (
+        await page.request.get(`/api/project?id=${task.id}`, {
+          headers: await sessionHeaders(page),
+        })
+      ).json()
+    ).detail;
+  const bug = await read();
+  expect(bug.task.id).toBe(task.id);
+  expect(bug.task.publicId).toBe("SAV-000001");
+  expect(bug.task.sectionId).toBe("bugs-high");
+  expect(bug.task.children).toEqual([]);
+  expect(bug.links[0].other.id).toBe(child.id);
+  await close(page);
+  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Bugs · P1 / P2", exact: true })
+      .getByRole("button", { name: /Reclassify export/ }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: /SAV-000001.*Reclassify export/ })
+    .click();
+  await dialog(page)
+    .getByRole("button", { name: "Convert to feature", exact: true })
+    .click();
+  await expect(
+    dialog(page).getByRole("button", { name: "Convert to bug", exact: true }),
+  ).toBeVisible();
+  const converted = await read();
+  expect(converted.task.kind).toBe("feature");
+  expect(converted.task.sectionId).toBe("feature-backlog");
+  expect(converted.task.publicId).toBe(bug.task.publicId);
+  expect(converted.comments).toEqual(bug.comments);
+  expect(converted.followers).toEqual(bug.followers);
+  expect(converted.links).toEqual(bug.links);
+  await close(page);
+  await page.getByRole("button", { name: /^Features/ }).click();
+  const backlog = page.getByRole("region", {
+    name: "Feature backlog",
+    exact: true,
+  });
+  await expect(
+    backlog.getByRole("button", { name: child.title, exact: true }),
+  ).toBeVisible();
+  await backlog
+    .getByLabel("Priority for SAV-000001", { exact: true })
+    .selectOption("P4");
+  await expect(
+    backlog.getByLabel("Priority for SAV-000001", { exact: true }),
+  ).toHaveValue("P4");
+  await backlog
+    .getByRole("button", { name: /SAV-000001.*Reclassify export/ })
+    .click();
+  await dialog(page)
+    .getByRole("button", { name: "Convert to bug", exact: true })
+    .click();
+  await expect(
+    dialog(page).getByRole("button", {
+      name: "Convert to feature",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect((await read()).task.publicId).toBe("SAV-000001");
+  await close(page);
+  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Bugs · P3 / P4", exact: true })
+      .getByLabel("Priority for SAV-000001", { exact: true }),
+  ).toHaveValue("P4");
+});
+
+test("feature list subtasks start collapsed and expand independently at each level", async ({
+  page,
+}) => {
+  await login(page);
+  const parent = await create(page, {
+    title: "Priority parent",
+    sectionId: "next-five",
+  });
+  const child = await create(page, {
+    title: "Priority child",
+    parentId: parent.id,
+  });
+  await create(page, { title: "Nested child", parentId: child.id });
+  const waiting = await create(page, { title: "Backlog parent" });
+  await create(page, { title: "Backlog child", parentId: waiting.id });
+  await page.reload();
+  const next = page.getByRole("region", {
+    name: "Next 5 features",
+    exact: true,
+  });
+  const backlog = page.getByRole("region", {
+    name: "Feature backlog",
+    exact: true,
+  });
+  const rootToggle = next.getByRole("button", {
+    name: "Expand subtasks for Priority parent",
+    exact: true,
+  });
+  await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(next.locator(".task-title")).toHaveCount(1);
+  await expect(backlog.locator(".task-title")).toHaveCount(1);
+  await rootToggle.click();
+  const childToggle = next.getByRole("button", {
+    name: "Expand subtasks for Priority child",
+    exact: true,
+  });
+  await expect(childToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(next.locator(".task-title")).toHaveCount(2);
+  await childToggle.click();
+  await expect(
+    next.getByRole("button", { name: "Nested child", exact: true }),
+  ).toBeVisible();
+  await next
+    .getByRole("button", {
+      name: "Collapse subtasks for Priority parent",
+      exact: true,
+    })
+    .click();
+  await expect(next.locator(".task-title")).toHaveCount(1);
+  await rootToggle.click();
+  await expect(childToggle).toHaveAttribute("aria-expanded", "false");
+  await page.reload();
+  await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
+  await backlog
+    .getByRole("button", {
+      name: "Expand subtasks for Backlog parent",
+      exact: true,
+    })
+    .click();
+  await expect(
+    backlog.getByRole("button", { name: "Backlog child", exact: true }),
+  ).toBeVisible();
+  await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await rootToggle.click();
+  await expect(childToggle).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.screenshot({
+    path: ".playwright/collapsed-subtasks-mobile.png",
+    fullPage: true,
+  });
 });

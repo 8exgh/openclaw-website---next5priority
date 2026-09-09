@@ -92,7 +92,7 @@ export function ItemView({
       title: task.title,
       description: task.description,
       ...(task.leaf ? { state: task.ownState } : {}),
-      ...(task.kind === "bug" ? { priority: task.priority } : {}),
+      priority: task.priority,
       implementorId: task.implementorId,
       reviewerId: task.reviewerId,
     });
@@ -217,24 +217,22 @@ export function ItemView({
                           State is computed from subtasks.
                         </p>
                       )}
-                      {task.kind === "bug" && (
-                        <label className="field">
-                          Priority
-                          <select
-                            value={draft.priority || "P3"}
-                            onChange={(e) =>
-                              setDraft({
-                                ...draft,
-                                priority: e.target.value as Task["priority"],
-                              })
-                            }
-                          >
-                            {PRIORITIES.map((p) => (
-                              <option key={p}>{p}</option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
+                      <label className="field">
+                        Priority
+                        <select
+                          value={draft.priority || "P3"}
+                          onChange={(e) =>
+                            setDraft({
+                              ...draft,
+                              priority: e.target.value as Task["priority"],
+                            })
+                          }
+                        >
+                          {PRIORITIES.map((p) => (
+                            <option key={p}>{p}</option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
                     <div className="field-grid">
                       <PersonSelect
@@ -512,6 +510,26 @@ export function ItemView({
               {canEdit && (
                 <section className="item-actions">
                   <h3>Item actions</h3>
+                  <button
+                    disabled={busy || editing}
+                    onClick={() =>
+                      act({
+                        action: "convert",
+                        kind: task.kind === "feature" ? "bug" : "feature",
+                      })
+                    }
+                  >
+                    Convert to {task.kind === "feature" ? "bug" : "feature"}
+                  </button>
+                  <p className="subtle small">
+                    {task.kind === "bug"
+                      ? "The feature goes into the backlog and keeps its SAV ID and history."
+                      : task.children.length
+                        ? "Subtasks stay as features in the backlog, linked to the new bug."
+                        : task.parentId
+                          ? "The bug becomes a separate item, linked to its current parent."
+                          : "The bug goes into the list matching its priority and keeps its history."}
+                  </p>
                   {task.kind === "feature" && (
                     <>
                       <button disabled={busy} onClick={() => addChild(task)}>

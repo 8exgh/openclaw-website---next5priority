@@ -133,6 +133,11 @@ export function Kanban({
                         }}
                       >
                         <div className="kanban-card-meta">
+                          <span
+                            className={`priority priority-${task.priority}`}
+                          >
+                            {task.priority}
+                          </span>
                           {task.kind === "feature" ? (
                             <span className="feature-badge">
                               {task.sectionId === "next-five"
@@ -140,14 +145,7 @@ export function Kanban({
                                 : "Feature"}
                             </span>
                           ) : (
-                            <>
-                              <span
-                                className={`priority priority-${task.priority}`}
-                              >
-                                {task.priority}
-                              </span>
-                              <span className="item-id">{task.publicId}</span>
-                            </>
+                            <span className="item-id">{task.publicId}</span>
                           )}
                         </div>
                         <button

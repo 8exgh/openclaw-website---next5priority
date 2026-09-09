@@ -134,19 +134,17 @@ export function NewItem({
                 ))}
               </select>
             </label>
-            {kind === "bug" && (
-              <label className="field">
-                Priority
-                <select
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value as Priority)}
-                >
-                  {PRIORITIES.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-              </label>
-            )}
+            <label className="field">
+              Priority
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as Priority)}
+              >
+                {PRIORITIES.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
+            </label>
           </div>
           <div className="field-grid">
             <PersonSelect

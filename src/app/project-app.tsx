@@ -41,6 +41,7 @@ function TaskRow({
   busy: boolean;
   depth?: number;
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="task-branch">
       <div
@@ -56,6 +57,17 @@ function TaskRow({
             {task.kind === "bug" ? "!" : "◇"}
           </span>
         )}
+        {!task.leaf && (
+          <button
+            className="subtask-toggle"
+            aria-label={`${expanded ? "Collapse" : "Expand"} subtasks for ${task.title}`}
+            aria-expanded={expanded}
+            aria-controls={`subtasks-${task.id}`}
+            onClick={() => setExpanded(!expanded)}
+          >
+            <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+          </button>
+        )}
         <button className="task-title" onClick={() => open(task.id)}>
           {task.publicId && <span className="item-id">{task.publicId}</span>}
           <span>{task.title}</span>
@@ -69,24 +81,23 @@ function TaskRow({
         <span className={`status status-${task.state}`}>
           {STATE_LABELS[task.state]}
         </span>
-        {task.kind === "bug" &&
-          (canEdit ? (
-            <select
-              className={`priority priority-${task.priority}`}
-              aria-label={`Priority for ${task.publicId}`}
-              value={task.priority || "P3"}
-              disabled={busy}
-              onChange={(e) => patch({ id: task.id, priority: e.target.value })}
-            >
-              {PRIORITIES.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </select>
-          ) : (
-            <span className={`priority priority-${task.priority}`}>
-              {task.priority}
-            </span>
-          ))}
+        {canEdit ? (
+          <select
+            className={`priority priority-${task.priority}`}
+            aria-label={`Priority for ${task.publicId || task.title}`}
+            value={task.priority || "P3"}
+            disabled={busy}
+            onChange={(e) => patch({ id: task.id, priority: e.target.value })}
+          >
+            {PRIORITIES.map((p) => (
+              <option key={p}>{p}</option>
+            ))}
+          </select>
+        ) : (
+          <span className={`priority priority-${task.priority}`}>
+            {task.priority}
+          </span>
+        )}
         {canEdit && task.kind === "feature" && !task.parentId && (
           <div className="row-actions">
             {task.sectionId === "next-five" && (
@@ -131,19 +142,24 @@ function TaskRow({
           </div>
         )}
       </div>
-      {task.children.map((child) => (
-        <TaskRow
-          key={child.id}
-          task={child}
-          users={users}
-          canEdit={canEdit}
-          open={open}
-          patch={patch}
-          count={count}
-          busy={busy}
-          depth={depth + 1}
-        />
-      ))}
+      {!task.leaf && (
+        <div id={`subtasks-${task.id}`} hidden={!expanded}>
+          {expanded &&
+            task.children.map((child) => (
+              <TaskRow
+                key={child.id}
+                task={child}
+                users={users}
+                canEdit={canEdit}
+                open={open}
+                patch={patch}
+                count={count}
+                busy={busy}
+                depth={depth + 1}
+              />
+            ))}
+        </div>
+      )}
     </div>
   );
 }

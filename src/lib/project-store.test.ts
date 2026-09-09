@@ -13,6 +13,7 @@ import {
 } from "./project-store.ts";
 import {
   addComment,
+  convertItem,
   createItem,
   deleteItem,
   followItem,
@@ -22,7 +23,7 @@ import {
   updateProfile,
 } from "./project-commands.ts";
 import { runProjectNotifications } from "./project-notifications.ts";
-import { initials, STATES, type User } from "./project-types.ts";
+import { initials, PRIORITIES, STATES, type User } from "./project-types.ts";
 import { imageMime } from "./project-assets.ts";
 
 const admin: User = {
@@ -43,8 +44,8 @@ const reader: User = {
   role: "read",
   name: "Read Only",
 };
-function setup() {
-  const db = projectDb(":memory:");
+function setup(file = ":memory:") {
+  const db = projectDb(file);
   for (const user of [admin, editor, reader])
     db.prepare(
       "INSERT INTO users (id,email,role,name,created_at) VALUES (?,?,?,?,?)",
@@ -145,6 +146,268 @@ test("next five enforces capacity and reorder; moving parents moves all descenda
     () => updateItem(db, admin, { id: waiting.id, position: 10 }),
     /Invalid position/,
   );
+  db.close();
+});
+
+test("feature priorities validate independently of list placement, rank, and parent priority", () => {
+  const db = setup();
+  const first = feature(db, "First", "next-five");
+  const second = feature(db, "Second", "next-five");
+  const waiting = feature(db, "Waiting");
+  assert.equal(first.priority, "P3");
+  for (const priority of PRIORITIES) {
+    const child = createItem(db, admin, {
+      title: priority,
+      parentId: first.id,
+      priority,
+    });
+    assert.equal(child.priority, priority);
+    updateItem(db, admin, { id: first.id, priority });
+    updateItem(db, admin, { id: waiting.id, priority });
+    assert.equal(itemDetail(db, first.id)!.task.priority, priority);
+    assert.equal(itemDetail(db, waiting.id)!.task.sectionId, "feature-backlog");
+    assert.deepEqual(
+      snapshot(db)[0].tasks.map((t) => t.id),
+      [first.id, second.id],
+    );
+  }
+  assert.equal(itemDetail(db, first.id)!.task.children[0].priority, "P1");
+  for (const priority of ["P0", "P5", 1, ""]) {
+    assert.throws(
+      () => createItem(db, admin, { title: "Invalid", priority }),
+      /Invalid priority/,
+    );
+    assert.throws(
+      () =>
+        updateItem(db, admin, { id: first.id, title: "Rollback", priority }),
+      /Invalid priority/,
+    );
+  }
+  assert.equal(itemDetail(db, first.id)!.task.title, "First");
+  db.close();
+});
+
+test("existing features receive P3 once without changing history, completion dates, or explicit priorities", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "n5-feature-priority-"));
+  const file = path.join(dir, "site.db");
+  let db = setup(file);
+  try {
+    const parent = createItem(db, admin, {
+      title: "Imported",
+      sectionId: "next-five",
+      state: "done",
+    });
+    const child = createItem(db, admin, {
+      title: "Imported child",
+      parentId: parent.id,
+      state: "done",
+    });
+    const explicit = createItem(db, admin, {
+      title: "Already prioritized",
+      priority: "P1",
+    });
+    const existingBug = bug(db, "Bug", "P2");
+    const before = itemDetail(db, child.id)!.task;
+    db.prepare("UPDATE tasks SET priority=NULL WHERE id IN (?,?)").run(
+      parent.id,
+      child.id,
+    );
+    db.prepare("DELETE FROM project_migrations WHERE version=3").run();
+    db.close();
+    db = projectDb(file);
+    assert.equal(itemDetail(db, parent.id)!.task.priority, "P3");
+    assert.deepEqual(itemDetail(db, child.id)!.task, before);
+    assert.equal(itemDetail(db, explicit.id)!.task.priority, "P1");
+    assert.equal(itemDetail(db, existingBug.id)!.task.priority, "P2");
+    const events = db
+      .prepare("SELECT data FROM events WHERE type='item_migrated'")
+      .all() as { data: string }[];
+    assert.deepEqual(
+      events.map((e) => JSON.parse(e.data).task.id),
+      [parent.id, child.id],
+    );
+    updateItem(db, admin, { id: parent.id, priority: "P4" });
+    const eventCount = (
+      db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }
+    ).n;
+    db.close();
+    db = projectDb(file);
+    assert.equal(itemDetail(db, parent.id)!.task.priority, "P4");
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }).n,
+      eventCount,
+    );
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true });
+  }
+});
+
+test("conversions preserve identity, completed dates, collaboration, and event-owned attachments", () => {
+  const db = setup();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "n5-convert-assets-"));
+  const previousAssets = process.env.ASSETS_PATH;
+  process.env.ASSETS_PATH = dir;
+  try {
+    const task = createItem(
+      db,
+      admin,
+      {
+        title: "Convert me",
+        description: "Keep\nthese details",
+        sectionId: "next-five",
+        state: "done",
+        priority: "P1",
+        implementorId: editor.id,
+        reviewerId: reader.id,
+      },
+      [{ name: "spec.txt", data: Buffer.from("Requirements") }],
+    );
+    const oldCompletion = "2026-01-01T00:00:00.000Z";
+    db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(
+      oldCompletion,
+      task.id,
+    );
+    addComment(db, editor, { id: task.id, body: "Keep this comment" }, [
+      { name: "notes.bin", data: Buffer.from([1, 2, 3]) },
+    ]);
+    followItem(db, reader, { id: task.id, follow: true });
+    const other = bug(db, "Related bug");
+    linkItem(db, admin, {
+      id: other.id,
+      targetId: task.id,
+      relation: "caused_by",
+    });
+    const before = itemDetail(db, task.id)!;
+    const outbox = (
+      db.prepare("SELECT COUNT(*) n FROM project_outbox").get() as { n: number }
+    ).n;
+    const converted = convertItem(db, editor, { id: task.id, kind: "bug" });
+    assert.equal(converted.publicId, "SAV-000002");
+    assert.equal(converted.sectionId, "bugs-high");
+    assert.equal(snapshot(db)[0].tasks.length, 0);
+    for (const kind of ["feature", "bug", "feature"] as const) {
+      const result = convertItem(db, editor, { id: converted.publicId, kind });
+      assert.equal(result.publicId, converted.publicId);
+      assert.equal(
+        result.sectionId,
+        kind === "feature" ? "feature-backlog" : "bugs-high",
+      );
+      assert.equal(result.completedAt, oldCompletion);
+      assert.equal(result.state, "done");
+      assert.equal(result.priority, "P1");
+      assert.equal(result.createdAt, task.createdAt);
+      assert.equal(result.createdBy, admin.id);
+      assert.equal(result.implementorId, editor.id);
+      assert.equal(result.reviewerId, reader.id);
+      const after = itemDetail(db, task.id)!;
+      assert.equal(after.task.description, task.description);
+      assert.deepEqual(after.comments, before.comments);
+      assert.deepEqual(after.attachments, before.attachments);
+      assert.deepEqual(after.followers, before.followers);
+      assert.deepEqual(after.links, before.links);
+    }
+    for (const attachment of before.attachments)
+      assert.ok(
+        fs.existsSync(path.join(dir, attachment.eventId, attachment.id)),
+      );
+    const events = db
+      .prepare("SELECT data FROM events WHERE type='item_converted'")
+      .all() as { data: string }[];
+    assert.equal(events.length, 4);
+    assert.equal(JSON.parse(events[0].data).task.publicId, converted.publicId);
+    convertItem(db, editor, { id: task.id, kind: "feature" });
+    assert.equal(
+      (
+        db
+          .prepare("SELECT COUNT(*) n FROM events WHERE type='item_converted'")
+          .get() as { n: number }
+      ).n,
+      4,
+    );
+    assert.equal(
+      (
+        db.prepare("SELECT COUNT(*) n FROM project_outbox").get() as {
+          n: number;
+        }
+      ).n,
+      outbox,
+    );
+    assert.equal(bug(db, "Next bug").publicId, "SAV-000003");
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true });
+    if (previousAssets === undefined) delete process.env.ASSETS_PATH;
+    else process.env.ASSETS_PATH = previousAssets;
+  }
+});
+
+test("converting nested features preserves child trees in backlog and links the former hierarchy", () => {
+  const db = setup();
+  const root = feature(db, "Root", "next-five");
+  const child = createItem(db, admin, {
+    title: "Child",
+    parentId: root.id,
+    priority: "P2",
+  });
+  const grandchild = createItem(db, admin, {
+    title: "Grandchild",
+    parentId: child.id,
+    state: "in_qa",
+  });
+  const leaf = createItem(db, admin, {
+    title: "Leaf",
+    parentId: grandchild.id,
+    state: "in_review",
+  });
+  const converted = convertItem(db, admin, { id: child.id, kind: "bug" });
+  assert.equal(converted.state, "in_review");
+  assert.equal(converted.parentId, null);
+  assert.equal(converted.sectionId, "bugs-high");
+  assert.equal(itemDetail(db, converted.id)!.task.children.length, 0);
+  assert.equal(itemDetail(db, grandchild.id)!.task.parentId, null);
+  assert.equal(
+    itemDetail(db, grandchild.id)!.task.sectionId,
+    "feature-backlog",
+  );
+  assert.equal(itemDetail(db, leaf.id)!.task.parentId, grandchild.id);
+  assert.equal(itemDetail(db, leaf.id)!.task.sectionId, "feature-backlog");
+  assert.equal(itemDetail(db, root.id)!.task.sectionId, "next-five");
+  assert.deepEqual(
+    new Set(itemDetail(db, child.id)!.links.map((link) => link.other.id)),
+    new Set([root.id, grandchild.id]),
+  );
+  assert.equal(allTasks(db).length, 4);
+  const event = db
+    .prepare("SELECT data FROM events WHERE type='item_converted'")
+    .get() as { data: string };
+  assert.equal(JSON.parse(event.data).movedFeatures.length, 2);
+  assert.throws(
+    () => convertItem(db, reader, { id: root.id, kind: "bug" }),
+    /Edit access/,
+  );
+  assert.throws(
+    () => convertItem(db, admin, { id: root.id, kind: "other" }),
+    /Invalid item type/,
+  );
+  assert.equal(itemDetail(db, root.id)!.task.kind, "feature");
+  db.close();
+});
+
+test("conversion rolls back list and hierarchy changes when recording the event fails", () => {
+  const db = setup();
+  const parent = feature(db, "Parent", "next-five");
+  createItem(db, admin, { title: "Child", parentId: parent.id });
+  const before = allTasks(db);
+  db.exec(
+    "CREATE TRIGGER reject_conversion BEFORE INSERT ON events WHEN NEW.type='item_converted' BEGIN SELECT RAISE(ABORT, 'Test failure'); END;",
+  );
+  assert.throws(
+    () => convertItem(db, admin, { id: parent.id, kind: "bug" }),
+    /Test failure/,
+  );
+  assert.deepEqual(allTasks(db), before);
+  assert.equal(bug(db).publicId, "SAV-000001");
   db.close();
 });
 

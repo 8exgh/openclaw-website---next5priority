@@ -9,6 +9,7 @@ import {
 } from "../../../lib/project-store";
 import {
   addComment,
+  convertItem,
   createItem,
   deleteItem,
   followItem,
@@ -65,6 +66,9 @@ async function mutate(req: NextRequest, method: "POST" | "PATCH" | "DELETE") {
             break;
           case "comment":
             id = addComment(db, user, input, uploads).taskId;
+            break;
+          case "convert":
+            id = convertItem(db, user, input).id;
             break;
           case "follow":
             followItem(db, user, input);

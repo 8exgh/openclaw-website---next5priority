@@ -156,7 +156,7 @@ export function projectDb(dbPath?: string) {
     >();
     const events = db
       .prepare(
-        "SELECT type,data,timestamp FROM events WHERE type IN ('task_created','task_updated','item_migrated','item_created','item_updated') ORDER BY rowid",
+        "SELECT type,data,timestamp FROM events WHERE type IN ('task_created','task_updated','item_migrated','item_created','item_updated','item_converted') ORDER BY rowid",
       )
       .all() as { type: string; data: string; timestamp: string }[];
     for (const event of events) {
@@ -187,6 +187,21 @@ export function projectDb(dbPath?: string) {
       );
     }
     db.prepare("INSERT INTO project_migrations VALUES (2)").run();
+  }).immediate();
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM project_migrations WHERE version=3").get())
+      return;
+    const features = db
+      .prepare("SELECT id FROM tasks WHERE kind='feature' AND priority IS NULL")
+      .all() as { id: string }[];
+    for (const feature of features) {
+      db.prepare("UPDATE tasks SET priority='P3' WHERE id=?").run(feature.id);
+      appendEvent(db, "item_migrated", {
+        task: ownTask(db, feature.id),
+        reason: "feature_priorities",
+      });
+    }
+    db.prepare("INSERT INTO project_migrations VALUES (3)").run();
   }).immediate();
   return db;
 }

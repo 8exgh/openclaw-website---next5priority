@@ -8,6 +8,11 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
 - **Features:** a feature backlog and an ordered Next 5 list. Move top-level
   features between lists and move priorities up/down. The server enforces a
   maximum of five, including concurrent requests. Subtasks move with their parent.
+  Features and subtasks have P1–P4 priorities (default P3), editable in their
+  details or directly in the list. Priority is independent of Next 5 rank and
+  list placement; all five features remain eligible for Kanban at any priority.
+  Subtasks start collapsed in list views. Each parent has an expand/collapse
+  button, including nested parents; item details still show direct subtasks.
 - **Bugs:** separate entry and lists for P1/P2 and P3/P4. Both sort by priority
   (P1 first) and date logged descending. Changing priority moves a bug immediately.
   Every bug gets a permanent, incrementing `SAV-000001` style identifier; deleted
@@ -33,6 +38,13 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   replacing initials. Administrators add teammates and manage access/API keys.
   Readers can view, download attachments, follow, and update their own profile;
   editors can create/edit/delete work, comment, attach files, and link items.
+- **Conversion:** use Convert to bug / Convert to feature in item details.
+  Conversion keeps the item ID, priority, displayed state, completed date,
+  comments, attachments, assignments, followers, and existing links. A feature
+  becoming a bug gets a SAV ID and moves into the matching priority list; any
+  existing SAV ID is retained across future conversions. A bug becoming a feature
+  goes into the backlog. Direct child features become backlog roots, keeping their
+  descendants, and Related to links preserve the former parent/child connections.
 
 ## Storage and migration
 
@@ -61,6 +73,9 @@ edits do not extend that window. Completed parent features use their latest chil
 completion date. Existing completion dates are recovered from state transitions
 in the event log, with the item's last edit date as a fallback when history is
 unavailable.
+
+Existing features without a priority receive P3 once, with snapshots recorded
+in the event log. Their ordering, edit dates, and completion dates are preserved.
 
 ### Attachments
 
@@ -143,12 +158,15 @@ and its compatibility alias `/api/v1/tasks`.
   `{ detail: { task, attachments, comments, followers, links } }`.
 - `POST`: create a feature or bug. Fields: `kind` (`feature`/`bug`), `title`,
   `description`, `state`, `implementorId`, `reviewerId`, feature `sectionId`
-  (`feature-backlog`/`next-five`), optional feature `parentId`, or bug `priority`.
-  Defaults: feature, backlog, Needs review, and P3 for bugs.
+  (`feature-backlog`/`next-five`), optional feature `parentId`, and `priority`
+  (`P1`/`P2`/`P3`/`P4`) for either kind.
+  Defaults: feature, backlog, Needs review, and P3.
 - `PATCH`: supply `id` and changed fields. Set a root feature's `sectionId` to
   move it; set its zero-based `position` to reorder within Next 5. Set assignment
   fields to `null` to unassign. A bug's section is always derived from its priority.
 - `POST { action: "comment", id, body }`: add a comment and/or attachments.
+- `POST { action: "convert", id, kind: "bug"|"feature" }`: convert an existing
+  item without recreating it. Repeating the same target kind is a no-op.
 - `POST { action: "follow", id, follow: true|false }`: personal accounts only.
 - `POST { action: "link", id, targetId, relation: "related_to"|"caused_by" }`.
 - `POST { action: "unlink", id, linkId }`.

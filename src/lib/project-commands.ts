@@ -12,7 +12,7 @@ import {
   itemAudience,
   queueItemNotification,
 } from "./project-notifications.ts";
-import { moveTree, nextBugId, ownTask } from "./project-store.ts";
+import { itemDetail, moveTree, nextBugId, ownTask } from "./project-store.ts";
 import {
   PRIORITIES,
   STATES,
@@ -150,10 +150,7 @@ export function createItem(
       throw new ProjectError(
         "Only features can have subtasks. Use links to connect bugs.",
       );
-    const priority =
-      kind === "bug"
-        ? enumValue(input.priority ?? "P3", PRIORITIES, "bug priority")
-        : null;
+    const priority = enumValue(input.priority ?? "P3", PRIORITIES, "priority");
     const sectionId =
       kind === "bug"
         ? priority === "P1" || priority === "P2"
@@ -253,17 +250,16 @@ export function updateItem(
         );
     }
     if (input.priority !== undefined) {
-      if (task.kind !== "bug")
-        throw new ProjectError("Only bugs have P1–P4 priority.");
       task.priority = enumValue(
         input.priority,
         PRIORITIES,
         "priority",
       ) as Priority;
-      task.sectionId =
-        task.priority === "P1" || task.priority === "P2"
-          ? "bugs-high"
-          : "bugs-low";
+      if (task.kind === "bug")
+        task.sectionId =
+          task.priority === "P1" || task.priority === "P2"
+            ? "bugs-high"
+            : "bugs-low";
     }
     if (input.implementorId !== undefined)
       task.implementorId = assignee(db, input.implementorId);
@@ -348,6 +344,88 @@ export function updateItem(
     return updated;
   });
 }
+export function convertItem(
+  db: Database.Database,
+  actor: User,
+  input: Input,
+): Task {
+  writable(actor);
+  return command(db, [], () => {
+    const old = requireTask(db, input.id);
+    const kind = enumValue(
+      input.kind,
+      ["feature", "bug"] as const,
+      "item type",
+    );
+    if (kind === old.kind) return old;
+    const detail = itemDetail(db, old.id)!.task;
+    const now = new Date().toISOString();
+    const sectionId =
+      kind === "feature"
+        ? "feature-backlog"
+        : old.priority === "P1" || old.priority === "P2"
+          ? "bugs-high"
+          : "bugs-low";
+    const position = (list: string) =>
+      (
+        db
+          .prepare(
+            "SELECT COALESCE(MAX(position),-1)+1 position FROM tasks WHERE section_id=? AND parent_id IS NULL",
+          )
+          .get(list) as { position: number }
+      ).position;
+    const descendants = db
+      .prepare(
+        "WITH RECURSIVE tree(id) AS (SELECT id FROM tasks WHERE parent_id=? UNION ALL SELECT t.id FROM tasks t JOIN tree ON t.parent_id=tree.id) SELECT id FROM tree",
+      )
+      .all(old.id) as { id: string }[];
+    // Bugs stand alone. Preserve each child feature tree in the backlog and
+    // replace the hierarchy edges with Related to links.
+    for (const child of detail.children) {
+      db.prepare(
+        "UPDATE tasks SET parent_id=NULL,position=?,updated_at=? WHERE id=?",
+      ).run(position("feature-backlog"), now, child.id);
+      moveTree(db, child.id, "feature-backlog");
+    }
+    db.prepare(
+      "UPDATE tasks SET kind=?,section_id=?,parent_id=NULL,public_id=?,state=?,completed_at=?,position=?,updated_at=? WHERE id=?",
+    ).run(
+      kind,
+      sectionId,
+      old.publicId || (kind === "bug" ? nextBugId(db) : null),
+      detail.state,
+      detail.completedAt,
+      position(sectionId),
+      now,
+      old.id,
+    );
+    normalizePositions(db, old.sectionId);
+    normalizePositions(db, sectionId);
+    const converted = ownTask(db, old.id)!;
+    appendEvent(db, "item_converted", {
+      task: converted,
+      previousKind: old.kind,
+      previousParentId: old.parentId,
+      movedFeatures: descendants.map(({ id }) => ownTask(db, id)),
+      by: actor.id,
+    });
+    for (const targetId of [
+      old.parentId,
+      ...detail.children.map((child) => child.id),
+    ]) {
+      if (!targetId) continue;
+      const linked = db
+        .prepare(
+          "SELECT 1 FROM item_links WHERE relation='related_to' AND ((source_id=? AND target_id=?) OR (source_id=? AND target_id=?))",
+        )
+        .get(old.id, targetId, targetId, old.id);
+      if (!linked)
+        linkItem(db, actor, { id: old.id, targetId, relation: "related_to" });
+    }
+    return converted;
+  });
+}
+
 export function addComment(
   db: Database.Database,
   actor: User,

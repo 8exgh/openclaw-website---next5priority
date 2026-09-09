@@ -47,7 +47,7 @@ export type Task = {
   description: string;
   state: TaskState;
   ownState: TaskState;
-  priority: Priority | null;
+  priority: Priority;
   implementorId: string | null;
   reviewerId: string | null;
   createdBy: string | null;

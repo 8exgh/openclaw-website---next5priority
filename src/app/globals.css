@@ -376,6 +376,13 @@ fieldset {
 .tasks > .task-branch:last-child > .task-row {
   border-bottom: 0;
 }
+.subtask-toggle {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 18px;
+}
 .rank-number {
   width: 28px;
   height: 28px;
