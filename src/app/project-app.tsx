@@ -5,6 +5,7 @@ import {
   STATES,
   STATE_LABELS,
   type ItemKind,
+  type Priority,
   type Section,
   type Task,
   type User,
@@ -22,13 +23,30 @@ import {
   StateControl,
 } from "./components/project-ui";
 
-type CreateOptions = { kind: ItemKind; sectionId?: string; parent?: Task };
-type BoardTab = ItemKind | "kanban";
+type CreateOptions = {
+  kind: ItemKind;
+  sectionId?: string;
+  parent?: Task;
+  initialPriority?: Priority;
+};
+type BoardTab = "feature" | "bugs-high" | "bugs-low" | "kanban";
+const TAB_PATHS: Record<BoardTab, string> = {
+  feature: "/",
+  "bugs-high": "/bugs/p1-p2",
+  "bugs-low": "/bugs/p3-p4",
+  kanban: "/kanban",
+};
+function itemTab(item: Task): BoardTab {
+  return item.kind === "feature"
+    ? "feature"
+    : item.priority === "P1" || item.priority === "P2"
+      ? "bugs-high"
+      : "bugs-low";
+}
 function tabUrl(tab: BoardTab) {
   const url = new URL(window.location.href);
-  url.pathname = tab === "kanban" ? "/kanban" : "/";
-  if (tab === "bug") url.searchParams.set("view", "bugs");
-  else url.searchParams.delete("view");
+  url.pathname = TAB_PATHS[tab];
+  url.searchParams.delete("view");
   return url;
 }
 function TaskRow({
@@ -218,18 +236,35 @@ export function ProjectApp({
     const sync = () => {
       const params = new URLSearchParams(window.location.search);
       setSelected(params.get("item") || null);
-      setTab(
-        window.location.pathname === "/kanban"
-          ? "kanban"
-          : params.get("view") === "bugs"
-            ? "bug"
-            : "feature",
-      );
+      const path = window.location.pathname;
+      const next =
+        (Object.keys(TAB_PATHS) as BoardTab[]).find(
+          (key) => TAB_PATHS[key] === path,
+        ) || "feature";
+      // Existing bug bookmarks still open the high-priority group. An item
+      // link will resolve to its actual group once its data has loaded.
+      const legacy = path === "/" && params.get("view") === "bugs";
+      setTab(legacy ? "bugs-high" : next);
+      if (legacy) window.history.replaceState({}, "", tabUrl("bugs-high"));
     };
     sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, [load]);
+  useEffect(() => {
+    if (!selected || tab === "kanban") return;
+    const item = items.find(
+      (item) => item.id === selected || item.publicId === selected,
+    );
+    if (!item) return;
+    const next = itemTab(item);
+    // Keep the item's URL current after creation, conversion, or a priority
+    // change, and resolve older /?item= links into the matching list.
+    if (next !== tab || window.location.pathname !== TAB_PATHS[next]) {
+      setTab(next);
+      window.history.replaceState({}, "", tabUrl(next));
+    }
+  }, [items, selected, tab]);
   const selectTab = (next: BoardTab) => {
     setTab(next);
     setSearch("");
@@ -240,8 +275,10 @@ export function ProjectApp({
   };
   const open = (id: string | null) => {
     setSelected(id);
-    const item = items.find((item) => item.id === id || item.publicId === id);
-    const next = item && tab !== "kanban" ? item.kind : tab;
+    const item = id
+      ? items.find((item) => item.id === id || item.publicId === id)
+      : undefined;
+    const next = item && tab !== "kanban" ? itemTab(item) : tab;
     setTab(next);
     const url = tabUrl(next);
     if (id) url.searchParams.set("item", id);
@@ -284,8 +321,9 @@ export function ProjectApp({
       <Login onDone={load} />
     );
   const canEdit = me.role !== "read";
+  const bugTab = tab === "bugs-high" || tab === "bugs-low";
   const visible = sections.filter((s) =>
-    tab === "feature" ? !s.id.startsWith("bugs-") : s.id.startsWith("bugs-"),
+    tab === "feature" ? !s.id.startsWith("bugs-") : s.id === tab,
   );
   const matching = (task: Task): boolean =>
     ((!search ||
@@ -297,7 +335,9 @@ export function ProjectApp({
   const features = items.filter(
     (t) => t.kind === "feature" && !t.parentId,
   ).length;
-  const bugs = items.filter((t) => t.kind === "bug").length;
+  const highBugs =
+    sections.find((s) => s.id === "bugs-high")?.tasks.length || 0;
+  const lowBugs = sections.find((s) => s.id === "bugs-low")?.tasks.length || 0;
   return (
     <>
       <header className="app-header">
@@ -359,7 +399,9 @@ export function ProjectApp({
                 ? "Your next five features and urgent bugs, from first review to done."
                 : tab === "feature"
                   ? "Choose five features to focus on. Keep everything else in the backlog, ready for its turn."
-                  : "Triage by priority. Track the fix from first report to final review."}
+                  : tab === "bugs-high"
+                    ? "P1 and P2 bugs, sorted by priority and newest report."
+                    : "P3 and P4 bugs, sorted by priority and newest report."}
             </p>
           </div>
           {canEdit && (
@@ -367,12 +409,13 @@ export function ProjectApp({
               className="primary new-item-button"
               onClick={() =>
                 setCreating({
-                  kind: tab === "bug" ? "bug" : "feature",
+                  kind: bugTab ? "bug" : "feature",
                   sectionId: "feature-backlog",
+                  initialPriority: tab === "bugs-high" ? "P2" : "P3",
                 })
               }
             >
-              ＋ {tab === "bug" ? "Report a bug" : "New feature"}
+              ＋ {bugTab ? "Report a bug" : "New feature"}
             </button>
           )}
         </section>
@@ -385,10 +428,16 @@ export function ProjectApp({
               Features <span>{features}</span>
             </button>
             <button
-              aria-pressed={tab === "bug"}
-              onClick={() => selectTab("bug")}
+              aria-pressed={tab === "bugs-high"}
+              onClick={() => selectTab("bugs-high")}
             >
-              Bugs <span>{bugs}</span>
+              P1/P2 Bugs <span>{highBugs}</span>
+            </button>
+            <button
+              aria-pressed={tab === "bugs-low"}
+              onClick={() => selectTab("bugs-low")}
+            >
+              P3/P4 Bugs <span>{lowBugs}</span>
             </button>
             <button
               aria-pressed={tab === "kanban"}
@@ -406,7 +455,7 @@ export function ProjectApp({
               placeholder={
                 tab === "kanban"
                   ? "Search priority work…"
-                  : tab === "bug"
+                  : bugTab
                     ? "Search bugs or SAV ID…"
                     : "Search features…"
               }
@@ -488,7 +537,7 @@ export function ProjectApp({
                             ? "No matching items."
                             : section.id === "next-five"
                               ? "Your next five start here."
-                              : tab === "bug"
+                              : bugTab
                                 ? "No bugs in this priority group."
                                 : "Room for your next idea."}
                         </p>

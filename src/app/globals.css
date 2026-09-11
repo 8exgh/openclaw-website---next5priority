@@ -286,6 +286,7 @@ fieldset {
 }
 .board-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   background: #e7e9e0;
   border-radius: 12px;
@@ -1313,11 +1314,12 @@ fieldset {
   .kanban-board {
     grid-template-columns: repeat(6, minmax(270px, 1fr));
   }
-  .board-kanban .board-tabs {
+  .board-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
-    justify-content: space-between;
   }
-  .board-kanban .board-tabs button {
+  .board-tabs button {
     padding: 10px 12px;
   }
 }

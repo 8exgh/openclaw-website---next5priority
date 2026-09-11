@@ -13,7 +13,11 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   list placement; all five features remain eligible for Kanban at any priority.
   Subtasks start collapsed in list views. Each parent has an expand/collapse
   button, including nested parents; item details still show direct subtasks.
-- **Bugs:** separate entry and lists for P1/P2 and P3/P4. Both sort by priority
+- **Bugs:** separate P1/P2 Bugs (`/bugs/p1-p2`) and P3/P4 Bugs (`/bugs/p3-p4`)
+  tabs, each with its own count and a URL that survives refresh and sign-in.
+  New reports default to P2 in the first tab and P3 in the second; choosing
+  another priority routes the item to its matching tab. Existing `/?item=<id>`
+  links still work, and `/?view=bugs` opens P1/P2. Both lists sort by priority
   (P1 first) and date logged descending. Changing priority moves a bug immediately.
   Every bug gets a permanent, incrementing `SAV-000001` style identifier; deleted
   identifiers are never reused. Bugs are independent items; use links to connect them.

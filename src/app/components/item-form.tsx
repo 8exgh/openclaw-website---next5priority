@@ -22,6 +22,7 @@ export function NewItem({
   kind,
   sectionId,
   parent,
+  initialPriority = "P3",
   users,
   close,
   created,
@@ -29,6 +30,7 @@ export function NewItem({
   kind: ItemKind;
   sectionId?: string;
   parent?: Task;
+  initialPriority?: Priority;
   users: User[];
   close: () => void;
   created: (id: string) => void;
@@ -36,7 +38,7 @@ export function NewItem({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [state, setState] = useState<TaskState>("needs_review");
-  const [priority, setPriority] = useState<Priority>("P3");
+  const [priority, setPriority] = useState<Priority>(initialPriority);
   const [implementorId, setImplementor] = useState("");
   const [reviewerId, setReviewer] = useState("");
   const [files, setFiles] = useState<File[]>([]);

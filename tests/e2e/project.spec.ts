@@ -234,7 +234,7 @@ test("bugs support multiline details, assignments, comments, inline images, down
   await login(page);
   const feature = await create(page, { title: "CSV export" });
   await page.reload();
-  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page.getByRole("button", { name: /^P1\/P2 Bugs/ }).click();
   await page.getByRole("button", { name: "Report a bug" }).click();
   await dialog(page)
     .getByRole("textbox", { name: "Title", exact: true })
@@ -339,17 +339,27 @@ test("bugs support multiline details, assignments, comments, inline images, down
     .click();
   await expect(dialog(page).locator(".link-card")).toContainText("Causes");
   await close(page);
-  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page.getByRole("button", { name: /^P1\/P2 Bugs/ }).click();
   await expect(
     page.getByRole("region", { name: "Bugs · P1 / P2" }),
   ).toContainText("Export loses accents");
   await page.getByLabel("Priority for SAV-000001").selectOption("P4");
   await expect(
-    page.getByRole("region", { name: "Bugs · P3 / P4" }),
-  ).toContainText("Export loses accents");
-  await expect(
     page.getByRole("region", { name: "Bugs · P1 / P2" }),
   ).not.toContainText("Export loses accents");
+  await expect(page).toHaveURL(/\/bugs\/p1-p2$/);
+  await page.getByRole("button", { name: /^P3\/P4 Bugs/ }).click();
+  await expect(
+    page.getByRole("region", { name: "Bugs · P3 / P4" }),
+  ).toContainText("Export loses accents");
+  await page.getByLabel("Priority for SAV-000001").selectOption("P2");
+  await expect(
+    page.getByRole("region", { name: "Bugs · P3 / P4" }),
+  ).not.toContainText("Export loses accents");
+  await page.getByRole("button", { name: /^P1\/P2 Bugs/ }).click();
+  await expect(
+    page.getByRole("region", { name: "Bugs · P1 / P2" }),
+  ).toContainText("Export loses accents");
   const connection = db();
   const attachment = connection
     .prepare(
@@ -821,7 +831,7 @@ test("features convert to bugs and back while preserving subtasks, collaboration
   expect(bug.task.children).toEqual([]);
   expect(bug.links[0].other.id).toBe(child.id);
   await close(page);
-  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page.getByRole("button", { name: /^P1\/P2 Bugs/ }).click();
   await expect(
     page
       .getByRole("region", { name: "Bugs · P1 / P2", exact: true })
@@ -871,8 +881,9 @@ test("features convert to bugs and back while preserving subtasks, collaboration
     }),
   ).toBeVisible();
   expect((await read()).task.publicId).toBe("SAV-000001");
+  await expect(page).toHaveURL(new RegExp(`/bugs/p3-p4\\?item=${task.id}$`));
   await close(page);
-  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page.getByRole("button", { name: /^P3\/P4 Bugs/ }).click();
   await expect(
     page
       .getByRole("region", { name: "Bugs · P3 / P4", exact: true })
@@ -1014,7 +1025,7 @@ test("state labels save directly in lists and details, preserve subtasks, and re
   await page.unroute("**/api/project");
   await page.reload();
   await expect(parentState).toHaveValue("ready_for_development");
-  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page.getByRole("button", { name: /^P1\/P2 Bugs/ }).click();
   await page
     .getByLabel(`State for ${bug.title}`, { exact: true })
     .selectOption("in_progress");
@@ -1030,7 +1041,7 @@ test("state labels save directly in lists and details, preserve subtasks, and re
   ).toHaveValue("done");
   await close(page);
   await page.reload();
-  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page.getByRole("button", { name: /^P1\/P2 Bugs/ }).click();
   await expect(
     page.getByLabel(`State for ${bug.title}`, { exact: true }),
   ).toHaveValue("done");
@@ -1259,13 +1270,12 @@ test("Kanban deep links survive sign-in, refresh, item details, and browser navi
   await expect(
     page.getByRole("region", { name: "Feature backlog" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /^Bugs/ }).click();
-  await expect(page).toHaveURL(/\/\?view=bugs$/);
+  await page.getByRole("button", { name: /^P1\/P2 Bugs/ }).click();
+  await expect(page).toHaveURL(/\/bugs\/p1-p2$/);
   await page.reload();
-  await expect(page.getByRole("button", { name: /^Bugs/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(
+    page.getByRole("button", { name: /^P1\/P2 Bugs/ }),
+  ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Kanban", exact: true }).click();
   await expect(page).toHaveURL(/\/kanban$/);
   await expect(board).toBeVisible();
@@ -1283,7 +1293,7 @@ test("list and Kanban status changes send background email identifying the actor
   });
   await expect.poll(() => mailsTo(editorEmail).length).toBe(1);
   await page.reload();
-  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page.getByRole("button", { name: /^P1\/P2 Bugs/ }).click();
   await page
     .getByLabel(`State for ${task.title}`, { exact: true })
     .selectOption("ready_for_development");
@@ -1317,3 +1327,135 @@ test("list and Kanban status changes send background email identifying the actor
     ),
   ).toHaveLength(0);
 });
+
+for (const group of [
+  {
+    path: "/bugs/p1-p2",
+    label: "P1/P2 Bugs",
+    section: "Bugs · P1 / P2",
+    priority: "P2",
+    otherPath: "/bugs/p3-p4",
+    otherLabel: "P3/P4 Bugs",
+    otherSection: "Bugs · P3 / P4",
+    otherPriority: "P4",
+  },
+  {
+    path: "/bugs/p3-p4",
+    label: "P3/P4 Bugs",
+    section: "Bugs · P3 / P4",
+    priority: "P3",
+    otherPath: "/bugs/p1-p2",
+    otherLabel: "P1/P2 Bugs",
+    otherSection: "Bugs · P1 / P2",
+    otherPriority: "P1",
+  },
+]) {
+  test(`${group.label} deep link supports sign-in, separate lists, refresh, and item navigation`, async ({
+    page,
+  }) => {
+    await login(page, E2E.ownerEmail, group.path);
+    const tab = page.getByRole("button", {
+      name: new RegExp(`^${group.label}`),
+    });
+    const otherTab = page.getByRole("button", {
+      name: new RegExp(`^${group.otherLabel}`),
+    });
+    const section = page.getByRole("region", {
+      name: group.section,
+      exact: true,
+    });
+    const otherSection = page.getByRole("region", {
+      name: group.otherSection,
+      exact: true,
+    });
+    await expect(tab).toHaveAttribute("aria-pressed", "true");
+    await expect(section).toBeVisible();
+    await expect(otherSection).toHaveCount(0);
+    await page.getByRole("button", { name: "Report a bug" }).click();
+    await expect(
+      dialog(page).getByRole("combobox", { name: "Priority", exact: true }),
+    ).toHaveValue(group.priority);
+    const title = `New ${group.label} report`;
+    await dialog(page)
+      .getByRole("textbox", { name: "Title", exact: true })
+      .fill(title);
+    await dialog(page).getByRole("button", { name: "Create bug" }).click();
+    await expect(
+      dialog(page).getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`${group.path}\\?item=`));
+    await close(page);
+    await expect(tab).toHaveText(`${group.label} 1`);
+    await expect(otherTab).toHaveText(`${group.otherLabel} 0`);
+    const other = await create(page, {
+      title: "Other priority group",
+      kind: "bug",
+      priority: group.otherPriority,
+    });
+    await create(page, { title: "Separate feature" });
+    await page.reload();
+    await expect(tab).toHaveAttribute("aria-pressed", "true");
+    await expect(otherTab).toHaveText(`${group.otherLabel} 1`);
+    await expect(section).toContainText(title);
+    await expect(
+      page.getByRole("button", {
+        name: /Other priority group|Separate feature/,
+      }),
+    ).toHaveCount(0);
+    await otherTab.click();
+    await expect(page).toHaveURL(new RegExp(`${group.otherPath}$`));
+    await expect(otherSection).toContainText(other.title);
+    await expect(section).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`${group.path}$`));
+    await expect(section).toContainText(title);
+    await page.goForward();
+    await expect(otherSection).toContainText(other.title);
+    await page.reload();
+    await expect(otherTab).toHaveAttribute("aria-pressed", "true");
+    // Old email links and a bookmark pointing at the wrong group both resolve
+    // using the item's actual priority, including its SAV identifier.
+    await page.goto(`/?item=${other.publicId}`);
+    await expect(page).toHaveURL(
+      new RegExp(`${group.otherPath}\\?item=${other.publicId}$`),
+    );
+    await expect(
+      dialog(page).getByRole("heading", { name: other.title, exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+      dialog(page).getByRole("heading", { name: other.title, exact: true }),
+    ).toBeVisible();
+    await dialog(page).getByRole("button", { name: "Edit item" }).click();
+    await dialog(page)
+      .getByRole("combobox", { name: "Priority", exact: true })
+      .selectOption(group.priority);
+    await dialog(page).getByRole("button", { name: "Save changes" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`${group.path}\\?item=${other.publicId}$`),
+    );
+    await close(page);
+    await expect(section).toContainText(other.title);
+    await expect(tab).toHaveText(`${group.label} 2`);
+    await expect(otherTab).toHaveText(`${group.otherLabel} 0`);
+    await page.goto(`/?view=bugs&item=${other.id}`);
+    await expect(page).toHaveURL(
+      new RegExp(`${group.path}\\?item=${other.id}$`),
+    );
+    await close(page);
+    await page.goto("/?view=bugs");
+    await expect(page).toHaveURL(/\/bugs\/p1-p2$/);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(tab).toBeVisible();
+    await expect(otherTab).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBeTruthy();
+    await page.screenshot({
+      path: `.playwright/${group.priority}-bug-tabs-mobile.png`,
+      fullPage: true,
+    });
+  });
+}
