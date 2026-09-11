@@ -156,7 +156,7 @@ test("comments and metadata edits do not renew completion; reopening and complet
   db.close();
 });
 
-test("computed parent completion uses the latest child completion, independently of parent edits", () => {
+test("parent completion is independent of child completion and later child edits", () => {
   const db = setup();
   const parent = createItem(db, actor, {
     title: "Parent",
@@ -177,10 +177,110 @@ test("computed parent completion uses the latest child completion, independently
   db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(older, a.id);
   db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(later, b.id);
   updateItem(db, actor, { id: parent.id, description: "New description" });
-  assert.equal(itemDetail(db, parent.id)!.task.completedAt, later);
-  updateItem(db, actor, { id: a.id, state: "in_review" });
   assert.equal(itemDetail(db, parent.id)!.task.completedAt, null);
+  const completed = updateItem(db, actor, { id: parent.id, state: "done" });
+  assert.ok(completed.completedAt);
+  updateItem(db, actor, { id: a.id, state: "in_review" });
+  assert.equal(
+    itemDetail(db, parent.id)!.task.completedAt,
+    completed.completedAt,
+  );
+  assert.equal(itemDetail(db, parent.id)!.task.state, "done");
+  updateItem(db, actor, { id: parent.id, state: "in_progress" });
+  assert.equal(itemDetail(db, b.id)!.task.completedAt, later);
   db.close();
+});
+
+test("independent parent migration preserves legacy rollups, completion dates, children, and history once", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "n5-parent-states-"));
+  const file = path.join(dir, "site.db");
+  let db = setup(file);
+  try {
+    const parent = createItem(db, actor, {
+      title: "Existing parent",
+      sectionId: "next-five",
+    });
+    const nested = createItem(db, actor, {
+      title: "Nested parent",
+      parentId: parent.id,
+    });
+    const a = createItem(db, actor, {
+      title: "Older completion",
+      parentId: parent.id,
+      state: "done",
+    });
+    const b = createItem(db, actor, {
+      title: "Later completion",
+      parentId: nested.id,
+      state: "done",
+    });
+    const active = createItem(db, actor, {
+      title: "Active parent",
+      state: "done",
+    });
+    createItem(db, actor, {
+      title: "Active child",
+      parentId: active.id,
+      state: "in_qa",
+    });
+    db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(
+      "2026-01-01T00:00:00.000Z",
+      a.id,
+    );
+    db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(
+      "2026-01-02T00:00:00.000Z",
+      b.id,
+    );
+    const childBefore = itemDetail(db, b.id)!.task;
+    db.prepare("DELETE FROM project_migrations WHERE version=4").run();
+    db.close();
+    db = projectDb(file);
+    for (const id of [parent.id, nested.id]) {
+      assert.equal(itemDetail(db, id)!.task.state, "done");
+      assert.equal(
+        itemDetail(db, id)!.task.completedAt,
+        "2026-01-02T00:00:00.000Z",
+      );
+    }
+    assert.equal(itemDetail(db, parent.id)!.task.updatedAt, parent.updatedAt);
+    assert.equal(itemDetail(db, active.id)!.task.state, "in_qa");
+    assert.equal(itemDetail(db, active.id)!.task.completedAt, null);
+    assert.deepEqual(itemDetail(db, b.id)!.task, childBefore);
+    assert.equal(
+      kanbanColumns(allTasks(db)).find((c) => c.state === "done")!.tasks.length,
+      0,
+    );
+    const events = db
+      .prepare(
+        "SELECT data FROM events WHERE type='item_migrated' AND json_extract(data,'$.reason')='independent_parent_states'",
+      )
+      .all() as { data: string }[];
+    assert.equal(events.length, 3);
+    assert.equal(
+      events.map((e) => JSON.parse(e.data)).find((e) => e.task.id === parent.id)
+        .task.completedAt,
+      "2026-01-02T00:00:00.000Z",
+    );
+    updateItem(db, actor, { id: parent.id, state: "ready_for_development" });
+    updateItem(db, actor, { id: b.id, state: "needs_review" });
+    const count = (
+      db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }
+    ).n;
+    db.close();
+    db = projectDb(file);
+    assert.equal(
+      itemDetail(db, parent.id)!.task.state,
+      "ready_for_development",
+    );
+    assert.equal(itemDetail(db, nested.id)!.task.state, "done");
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }).n,
+      count,
+    );
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true });
+  }
 });
 
 test("completion migration replays historical transitions and ignores later edits", () => {

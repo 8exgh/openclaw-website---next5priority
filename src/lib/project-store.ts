@@ -203,6 +203,25 @@ export function projectDb(dbPath?: string) {
     }
     db.prepare("INSERT INTO project_migrations VALUES (3)").run();
   }).immediate();
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM project_migrations WHERE version=4").get())
+      return;
+    // Keep the states and completion dates people currently see before making
+    // parent states independently editable. Child records stay unchanged.
+    const parents = allTasks(db, true).filter((task) => !task.leaf);
+    for (const parent of parents) {
+      db.prepare("UPDATE tasks SET state=?,completed_at=? WHERE id=?").run(
+        parent.state,
+        parent.completedAt,
+        parent.id,
+      );
+      appendEvent(db, "item_migrated", {
+        task: ownTask(db, parent.id),
+        reason: "independent_parent_states",
+      });
+    }
+    db.prepare("INSERT INTO project_migrations VALUES (4)").run();
+  }).immediate();
   return db;
 }
 
@@ -285,20 +304,7 @@ function aggregate(states: TaskState[], own: TaskState): TaskState {
     ? STATES[Math.min(...states.map((s) => STATES.indexOf(s)))]
     : own;
 }
-export function projectedState(
-  db: Database.Database,
-  taskId: string,
-  own: TaskState,
-): TaskState {
-  const children = db
-    .prepare("SELECT id,state FROM tasks WHERE parent_id=?")
-    .all(taskId) as { id: string; state: TaskState }[];
-  return aggregate(
-    children.map((child) => projectedState(db, child.id, child.state)),
-    own,
-  );
-}
-export function allTasks(db: Database.Database): Task[] {
+export function allTasks(db: Database.Database, legacyRollups = false): Task[] {
   const rows = db
     .prepare(`${TASK_SELECT} ORDER BY position,created_at,id`)
     .all() as Task[];
@@ -308,14 +314,16 @@ export function allTasks(db: Database.Database): Task[] {
       children.set(row.parentId, [...(children.get(row.parentId) || []), row]);
   const build = (row: Task): Task => {
     const nested = (children.get(row.id) || []).map(build);
-    const state = aggregate(
-      nested.map((c) => c.state),
-      row.ownState,
-    );
+    const state = legacyRollups
+      ? aggregate(
+          nested.map((c) => c.state),
+          row.ownState,
+        )
+      : row.ownState;
     const completedAt =
       state !== "done"
         ? null
-        : nested.length
+        : legacyRollups && nested.length
           ? nested
               .map((c) => c.completedAt || c.updatedAt)
               .sort()

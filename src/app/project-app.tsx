@@ -19,6 +19,7 @@ import {
   command,
   ErrorNotice,
   errorMessage,
+  StateControl,
 } from "./components/project-ui";
 
 type CreateOptions = { kind: ItemKind; sectionId?: string; parent?: Task };
@@ -78,9 +79,12 @@ function TaskRow({
         {task.implementorId && (
           <Avatar user={users.find((u) => u.id === task.implementorId)} />
         )}
-        <span className={`status status-${task.state}`}>
-          {STATE_LABELS[task.state]}
-        </span>
+        <StateControl
+          task={task}
+          canEdit={canEdit}
+          disabled={busy}
+          onChange={(state) => patch({ id: task.id, state })}
+        />
         {canEdit ? (
           <select
             className={`priority priority-${task.priority}`}
@@ -512,7 +516,7 @@ export function ProjectApp() {
           {tab === "kanban"
             ? "Completed cards stay visible for 28 days from completion. Earlier work remains available in Features and Bugs."
             : tab === "feature"
-              ? "Subtasks move with their parent. Parent states reflect the earliest unfinished stage beneath them."
+              ? "Change an item’s state from its label. Parent and subtask states are independent."
               : "Changing a bug’s priority automatically places it in the correct list."}
         </p>
       </main>

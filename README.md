@@ -18,13 +18,14 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   Every bug gets a permanent, incrementing `SAV-000001` style identifier; deleted
   identifiers are never reused. Bugs are independent items; use links to connect them.
 - **States:** Needs review → Ready for development → In progress → In QA →
-  In review → Done. Any leaf can be set to any state. Features with subtasks
-  show the earliest child stage recursively; all-done children produce Done.
+  In review → Done. Editors can change any item's state directly from its
+  colored label in lists, details, or Kanban. Parent and subtask states are
+  independent: moving a parent keeps its subtasks in their current states.
   Completion does not automatically remove a feature from Next 5: move it back
   to the backlog to free its slot. The state filter includes completed work.
 - **Kanban:** six columns from Needs review through Done, combining the Next 5
-  features with P1/P2 bugs. Editors move leaf cards by dragging or selecting a
-  state; parent features follow their subtasks. Done shows features and P1/P2
+  features with P1/P2 bugs. Editors move any card, including parent features,
+  by dragging it into a column or selecting a state. Done shows features and P1/P2
   bugs completed within the last 28 days, including completed features moved
   back to the backlog. Older completed items remain accessible in the lists.
 - **Details:** titles, multiline descriptions, implementor/reviewer assignments,
@@ -69,13 +70,17 @@ changes, attachment metadata, profile changes, and notification delivery records
 
 Completion dates are stored separately from edit dates. Reopening clears the
 completion date; completing again starts a new 28-day window. Comments and other
-edits do not extend that window. Completed parent features use their latest child
-completion date. Existing completion dates are recovered from state transitions
+edits do not extend that window. Each parent tracks its own completion date.
+Existing completion dates are recovered from state transitions
 in the event log, with the item's last edit date as a fallback when history is
 unavailable.
 
 Existing features without a priority receive P3 once, with snapshots recorded
 in the event log. Their ordering, edit dates, and completion dates are preserved.
+
+Existing parents' displayed states and completion dates are preserved once when
+migrating from computed child rollups to independently editable states. The
+migration records each parent snapshot without changing children or edit dates.
 
 ### Attachments
 

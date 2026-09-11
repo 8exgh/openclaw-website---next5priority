@@ -208,9 +208,24 @@ test("features stay separate; next five can reorder and move with capacity enfor
     .locator(".task-title")
     .filter({ hasText: "Customer dashboard" })
     .click();
-  await expect(dialog(page).locator(".detail-toolbar .status")).toHaveText(
-    "In review",
-  );
+  await expect(
+    dialog(page).getByLabel("State for Customer dashboard", { exact: true }),
+  ).toHaveValue("needs_review");
+  await dialog(page)
+    .getByLabel("State for Customer dashboard", { exact: true })
+    .selectOption("in_qa");
+  await expect(
+    dialog(page).getByLabel("State for Dashboard API", { exact: true }),
+  ).toHaveValue("in_review");
+  await dialog(page)
+    .getByLabel("State for Dashboard API", { exact: true })
+    .selectOption("in_progress");
+  await expect(
+    dialog(page).getByLabel("State for Dashboard API", { exact: true }),
+  ).toHaveValue("in_progress");
+  await expect(
+    dialog(page).getByLabel("State for Customer dashboard", { exact: true }),
+  ).toHaveValue("in_qa");
 });
 
 test("bugs support multiline details, assignments, comments, inline images, downloads and causal links", async ({
@@ -581,7 +596,10 @@ test("Kanban combines priorities, moves cards, and keeps only four weeks of Done
     title: "Feature with subtasks",
     sectionId: "next-five",
   });
-  await create(page, { title: "Nested work", parentId: parent.id });
+  const child = await create(page, {
+    title: "Nested work",
+    parentId: parent.id,
+  });
   await create(page, { title: "Waiting in backlog" });
   await create(page, {
     title: "Lower priority bug",
@@ -639,10 +657,33 @@ test("Kanban combines priorities, moves cards, and keeps only four weeks of Done
     ).toHaveCount(0);
   await expect(
     board.getByLabel(`State for ${parent.title}`, { exact: true }),
-  ).toHaveCount(0);
+  ).toHaveValue("needs_review");
   await expect(
     board.getByRole("article", { name: parent.title, exact: true }),
-  ).toContainText("1 subtask · state follows subtasks");
+  ).toContainText("1 subtask");
+  await board
+    .getByRole("article", { name: parent.title, exact: true })
+    .getByRole("button", { name: parent.title, exact: true })
+    .dragTo(
+      board.getByRole("region", { name: "In progress column", exact: true }),
+    );
+  await expect(
+    board.getByRole("region", { name: "In progress column", exact: true }),
+  ).toContainText(parent.title);
+  await expect(dialog(page)).toHaveCount(0);
+  const unchangedChild = await page.request.get(`/api/project?id=${child.id}`, {
+    headers: await sessionHeaders(page),
+  });
+  expect((await unchangedChild.json()).detail.task.state).toBe("needs_review");
+  await board
+    .getByRole("article", { name: highBug.title, exact: true })
+    .locator(".kanban-drag-handle")
+    .dragTo(
+      board.getByRole("region", { name: "In review column", exact: true }),
+    );
+  await expect(
+    board.getByRole("region", { name: "In review column", exact: true }),
+  ).toContainText(highBug.title);
   await board
     .getByLabel(`State for ${feature.title}`, { exact: true })
     .selectOption("in_progress");
@@ -673,6 +714,12 @@ test("Kanban combines priorities, moves cards, and keeps only four weeks of Done
   });
   await page.reload();
   await page.getByRole("button", { name: "Kanban", exact: true }).click();
+  await expect(
+    board.getByLabel(`State for ${parent.title}`, { exact: true }),
+  ).toHaveValue("in_progress");
+  await expect(
+    board.getByLabel(`State for ${highBug.title}`, { exact: true }),
+  ).toHaveValue("in_review");
   await expect(
     board.getByRole("button", { name: oldBug.title, exact: true }),
   ).toHaveCount(0);
@@ -753,9 +800,9 @@ test("features convert to bugs and back while preserving subtasks, collaboration
   await expect(dialog(page).locator(".detail-toolbar .priority")).toHaveText(
     "P2",
   );
-  await expect(dialog(page).locator(".detail-toolbar .status")).toHaveText(
-    "In review",
-  );
+  await expect(
+    dialog(page).getByLabel(`State for ${task.title}`, { exact: true }),
+  ).toHaveValue("needs_review");
   await expect(
     dialog(page).getByRole("img", { name: "conversion.png", exact: true }),
   ).toBeVisible();
@@ -908,4 +955,95 @@ test("feature list subtasks start collapsed and expand independently at each lev
     path: ".playwright/collapsed-subtasks-mobile.png",
     fullPage: true,
   });
+});
+
+test("state labels save directly in lists and details, preserve subtasks, and report failed updates", async ({
+  page,
+}) => {
+  await login(page);
+  const parent = await create(page, {
+    title: "Editable parent",
+    sectionId: "next-five",
+  });
+  const child = await create(page, {
+    title: "Editable child",
+    parentId: parent.id,
+    state: "in_qa",
+  });
+  const bug = await create(page, {
+    title: "Editable bug",
+    kind: "bug",
+    priority: "P1",
+  });
+  await page.reload();
+  const next = page.getByRole("region", {
+    name: "Next 5 features",
+    exact: true,
+  });
+  const parentState = next.getByLabel(`State for ${parent.title}`, {
+    exact: true,
+  });
+  await parentState.selectOption("ready_for_development");
+  await expect(parentState).toHaveValue("ready_for_development");
+  await next
+    .getByRole("button", {
+      name: `Expand subtasks for ${parent.title}`,
+      exact: true,
+    })
+    .click();
+  const childState = next.getByLabel(`State for ${child.title}`, {
+    exact: true,
+  });
+  await expect(childState).toHaveValue("in_qa");
+  await childState.selectOption("in_review");
+  await expect(childState).toHaveValue("in_review");
+  await expect(parentState).toHaveValue("ready_for_development");
+  await page.route("**/api/project", async (route) => {
+    if (route.request().method() === "PATCH")
+      await route.fulfill({
+        status: 409,
+        json: { error: "Could not save the state. Try again." },
+      });
+    else await route.continue();
+  });
+  await parentState.selectOption("done");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Could not save the state" }),
+  ).toBeVisible();
+  await expect(parentState).toHaveValue("ready_for_development");
+  await page.unroute("**/api/project");
+  await page.reload();
+  await expect(parentState).toHaveValue("ready_for_development");
+  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page
+    .getByLabel(`State for ${bug.title}`, { exact: true })
+    .selectOption("in_progress");
+  await expect(
+    page.getByLabel(`State for ${bug.title}`, { exact: true }),
+  ).toHaveValue("in_progress");
+  await page.getByRole("button", { name: /SAV-000001.*Editable bug/ }).click();
+  await dialog(page)
+    .getByLabel(`State for ${bug.title}`, { exact: true })
+    .selectOption("done");
+  await expect(
+    dialog(page).getByLabel(`State for ${bug.title}`, { exact: true }),
+  ).toHaveValue("done");
+  await close(page);
+  await page.reload();
+  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await expect(
+    page.getByLabel(`State for ${bug.title}`, { exact: true }),
+  ).toHaveValue("done");
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await login(page, readerEmail);
+  await expect(
+    page.getByLabel(`State for ${parent.title}`, { exact: true }),
+  ).toHaveCount(0);
+  await next.locator(".task-title").filter({ hasText: parent.title }).click();
+  await expect(
+    dialog(page).getByLabel(`State for ${parent.title}`, { exact: true }),
+  ).toHaveCount(0);
+  await expect(dialog(page).locator(".detail-toolbar .status")).toHaveText(
+    "Ready for development",
+  );
 });

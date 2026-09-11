@@ -243,11 +243,6 @@ export function updateItem(
       task.description = text(input.description, "Description", 100_000);
     if (input.state !== undefined) {
       task.state = enumValue(input.state, STATES, "state") as TaskState;
-      if (db.prepare("SELECT 1 FROM tasks WHERE parent_id=?").get(task.id))
-        throw new ProjectError(
-          "Parent state is computed from its children.",
-          409,
-        );
     }
     if (input.priority !== undefined) {
       task.priority = enumValue(

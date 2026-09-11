@@ -20,6 +20,7 @@ import {
   FilePicker,
   Modal,
   PersonSelect,
+  StateControl,
 } from "./project-ui";
 
 export function ItemView({
@@ -75,7 +76,11 @@ export function ItemView({
         { id, ...data },
         uploads,
       );
-      setDetail(result.detail);
+      setDetail(
+        data && "id" in data && data.id !== id
+          ? (await api(`/api/project?id=${encodeURIComponent(id)}`)).detail
+          : result.detail,
+      );
       await changed();
       return true;
     } catch (e) {
@@ -91,7 +96,7 @@ export function ItemView({
     setDraft({
       title: task.title,
       description: task.description,
-      ...(task.leaf ? { state: task.ownState } : {}),
+      state: task.state,
       priority: task.priority,
       implementorId: task.implementorId,
       reviewerId: task.reviewerId,
@@ -127,9 +132,12 @@ export function ItemView({
       ) : (
         <>
           <div className="detail-toolbar">
-            <span className={`status status-${task.state}`}>
-              {STATE_LABELS[task.state]}
-            </span>
+            <StateControl
+              task={task}
+              canEdit={canEdit}
+              disabled={busy || editing}
+              onChange={(state) => act({ state }, "PATCH")}
+            />
             {task.priority && (
               <span className={`priority priority-${task.priority}`}>
                 {task.priority}
@@ -193,30 +201,24 @@ export function ItemView({
                       disabled={busy}
                     />
                     <div className="field-grid">
-                      {task.leaf ? (
-                        <label className="field">
-                          State
-                          <select
-                            value={draft.state}
-                            onChange={(e) =>
-                              setDraft({
-                                ...draft,
-                                state: e.target.value as Task["state"],
-                              })
-                            }
-                          >
-                            {STATES.map((s) => (
-                              <option key={s} value={s}>
-                                {STATE_LABELS[s]}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : (
-                        <p className="subtle small">
-                          State is computed from subtasks.
-                        </p>
-                      )}
+                      <label className="field">
+                        State
+                        <select
+                          value={draft.state}
+                          onChange={(e) =>
+                            setDraft({
+                              ...draft,
+                              state: e.target.value as Task["state"],
+                            })
+                          }
+                        >
+                          {STATES.map((s) => (
+                            <option key={s} value={s}>
+                              {STATE_LABELS[s]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <label className="field">
                         Priority
                         <select
@@ -290,16 +292,22 @@ export function ItemView({
                 <section className="detail-section">
                   <h3>Subtasks</h3>
                   {task.children.map((child) => (
-                    <button
-                      className="linked-item"
-                      key={child.id}
-                      onClick={() => open(child.id)}
-                    >
-                      <span>{child.title}</span>
-                      <span className={`status status-${child.state}`}>
-                        {STATE_LABELS[child.state]}
-                      </span>
-                    </button>
+                    <div className="subtask-detail-row" key={child.id}>
+                      <button
+                        className="linked-item"
+                        onClick={() => open(child.id)}
+                      >
+                        {child.title}
+                      </button>
+                      <StateControl
+                        task={child}
+                        canEdit={canEdit}
+                        disabled={busy || editing}
+                        onChange={(state) =>
+                          act({ id: child.id, state }, "PATCH")
+                        }
+                      />
+                    </div>
                   ))}
                 </section>
               )}

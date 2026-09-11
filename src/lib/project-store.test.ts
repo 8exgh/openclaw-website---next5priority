@@ -4,13 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import {
-  allTasks,
-  itemDetail,
-  projectDb,
-  projectedState,
-  snapshot,
-} from "./project-store.ts";
+import { allTasks, itemDetail, projectDb, snapshot } from "./project-store.ts";
 import {
   addComment,
   convertItem,
@@ -87,7 +81,7 @@ test("legacy tasks migrate without losing titles, descendants, states, or excess
   assert.equal(snapshot(db)[0].tasks.length, 5);
   assert.equal(allTasks(db).length, 10);
   assert.equal(itemDetail(db, "child")!.task.sectionId, "feature-backlog");
-  assert.equal(projectedState(db, "f5", "in_progress"), "in_qa");
+  assert.equal(itemDetail(db, "f5")!.task.state, "in_qa");
   assert.equal(itemDetail(db, "b2")!.links[0].other.id, "b1");
   assert.equal(itemDetail(db, "b1")!.task.publicId, "SAV-000001");
   assert.equal(itemDetail(db, "b2")!.task.parentId, null);
@@ -361,7 +355,7 @@ test("converting nested features preserves child trees in backlog and links the 
     state: "in_review",
   });
   const converted = convertItem(db, admin, { id: child.id, kind: "bug" });
-  assert.equal(converted.state, "in_review");
+  assert.equal(converted.state, "needs_review");
   assert.equal(converted.parentId, null);
   assert.equal(converted.sectionId, "bugs-high");
   assert.equal(itemDetail(db, converted.id)!.task.children.length, 0);
@@ -450,7 +444,7 @@ test("bug IDs increment without reuse and lists sort by priority then logged dat
   db.close();
 });
 
-test("all six states persist; parents reflect the earliest child stage recursively", () => {
+test("all six states persist independently for parents and subtasks", () => {
   const db = setup();
   const parent = feature(db);
   const a = createItem(db, admin, { title: "A", parentId: parent.id });
@@ -458,12 +452,14 @@ test("all six states persist; parents reflect the earliest child stage recursive
   updateItem(db, admin, { id: b.id, state: "done" });
   for (const state of STATES) {
     updateItem(db, admin, { id: a.id, state });
-    assert.equal(itemDetail(db, parent.id)!.task.state, state);
+    assert.equal(itemDetail(db, parent.id)!.task.state, "needs_review");
   }
-  assert.throws(
-    () => updateItem(db, admin, { id: parent.id, state: "done" }),
-    /computed/,
-  );
+  for (const state of STATES) {
+    updateItem(db, admin, { id: parent.id, state });
+    assert.equal(itemDetail(db, parent.id)!.task.state, state);
+    assert.equal(itemDetail(db, a.id)!.task.state, "done");
+    assert.equal(itemDetail(db, b.id)!.task.state, "done");
+  }
   assert.throws(
     () =>
       updateItem(db, admin, {

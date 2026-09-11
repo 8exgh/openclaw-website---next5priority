@@ -2,8 +2,12 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   initials,
+  STATES,
+  STATE_LABELS,
   userName,
   type Attachment,
+  type Task,
+  type TaskState,
   type User,
 } from "../../lib/project-types";
 
@@ -43,6 +47,37 @@ export const dateLabel = (date: string) =>
     dateStyle: "medium",
     timeStyle: "short",
   });
+export function StateControl({
+  task,
+  canEdit,
+  disabled = false,
+  onChange,
+}: {
+  task: Task;
+  canEdit: boolean;
+  disabled?: boolean;
+  onChange: (state: TaskState) => void;
+}) {
+  return canEdit ? (
+    <select
+      className={`status state-control status-${task.state}`}
+      aria-label={`State for ${task.title}`}
+      value={task.state}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value as TaskState)}
+    >
+      {STATES.map((state) => (
+        <option key={state} value={state}>
+          {STATE_LABELS[state]}
+        </option>
+      ))}
+    </select>
+  ) : (
+    <span className={`status status-${task.state}`}>
+      {STATE_LABELS[task.state]}
+    </span>
+  );
+}
 export function Avatar({
   user,
   large = false,

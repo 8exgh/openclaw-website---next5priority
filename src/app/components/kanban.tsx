@@ -1,15 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { kanbanColumns } from "../../lib/kanban";
 import {
-  STATES,
-  STATE_LABELS,
   userName,
   type Task,
   type TaskState,
   type User,
 } from "../../lib/project-types";
-import { Avatar, dateLabel } from "./project-ui";
+import { Avatar, dateLabel, StateControl } from "./project-ui";
 
 export function Kanban({
   items,
@@ -32,6 +30,7 @@ export function Kanban({
 }) {
   const [, refreshClock] = useState(0);
   const [dragging, setDragging] = useState<string | null>(null);
+  const dragId = useRef<string | null>(null);
   const [over, setOver] = useState<TaskState | null>(null);
   useEffect(() => {
     const timer = setInterval(() => refreshClock((tick) => tick + 1), 60_000);
@@ -56,6 +55,17 @@ export function Kanban({
         role="region"
         aria-label="Kanban board"
         tabIndex={0}
+        onDragOver={(event) => {
+          if (!dragId.current || !canEdit || busy) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const direction =
+            event.clientX < bounds.left + 60
+              ? -1
+              : event.clientX > bounds.right - 60
+                ? 1
+                : 0;
+          if (direction) event.currentTarget.scrollLeft += direction * 24;
+        }}
       >
         <div className="kanban-board">
           {columns.map((column) => {
@@ -66,7 +76,7 @@ export function Kanban({
                 aria-label={`${column.label} column`}
                 className={`kanban-column kanban-${column.state}${over === column.state ? " drag-over" : ""}`}
                 onDragOver={(event) => {
-                  if (dragging && canEdit && !busy) {
+                  if (dragId.current && canEdit && !busy) {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
                     setOver(column.state);
@@ -81,17 +91,18 @@ export function Kanban({
                 onDrop={(event) => {
                   event.preventDefault();
                   setOver(null);
-                  setDragging(null);
                   const id = event.dataTransfer.getData("text/plain");
                   const task = items.find((item) => item.id === id);
                   if (
                     canEdit &&
                     !busy &&
-                    task?.leaf &&
-                    task.id === dragging &&
+                    task &&
+                    task.id === dragId.current &&
                     task.state !== column.state
                   )
                     void patch({ id, state: column.state });
+                  dragId.current = null;
+                  setDragging(null);
                 }}
               >
                 <div className="kanban-heading">
@@ -117,17 +128,23 @@ export function Kanban({
                         key={task.id}
                         className={`kanban-card${dragging === task.id ? " dragging" : ""}`}
                         aria-label={task.title}
-                        draggable={canEdit && task.leaf && !busy}
+                        draggable={canEdit && !busy}
                         onDragStart={(event) => {
-                          if (!canEdit || !task.leaf || busy) {
+                          if (
+                            !canEdit ||
+                            busy ||
+                            (event.target as HTMLElement).closest("select")
+                          ) {
                             event.preventDefault();
                             return;
                           }
                           event.dataTransfer.setData("text/plain", task.id);
                           event.dataTransfer.effectAllowed = "move";
+                          dragId.current = task.id;
                           setDragging(task.id);
                         }}
                         onDragEnd={() => {
+                          dragId.current = null;
                           setDragging(null);
                           setOver(null);
                         }}
@@ -147,6 +164,15 @@ export function Kanban({
                           ) : (
                             <span className="item-id">{task.publicId}</span>
                           )}
+                          {canEdit && (
+                            <span
+                              className="kanban-drag-handle"
+                              title="Drag to change state"
+                              aria-hidden="true"
+                            >
+                              ⠿
+                            </span>
+                          )}
                         </div>
                         <button
                           className="kanban-card-title"
@@ -163,7 +189,6 @@ export function Kanban({
                           <p className="kanban-computed">
                             {childCount}{" "}
                             {childCount === 1 ? "subtask" : "subtasks"}
-                            {" · state follows subtasks"}
                           </p>
                         )}
                         <div className="kanban-people">
@@ -187,22 +212,12 @@ export function Kanban({
                             Completed {dateLabel(task.completedAt)}
                           </p>
                         )}
-                        {canEdit && task.leaf && (
-                          <select
-                            aria-label={`State for ${task.title}`}
-                            value={task.state}
-                            disabled={busy}
-                            onChange={(event) =>
-                              patch({ id: task.id, state: event.target.value })
-                            }
-                          >
-                            {STATES.map((state) => (
-                              <option key={state} value={state}>
-                                {STATE_LABELS[state]}
-                              </option>
-                            ))}
-                          </select>
-                        )}
+                        <StateControl
+                          task={task}
+                          canEdit={canEdit}
+                          disabled={busy}
+                          onChange={(state) => patch({ id: task.id, state })}
+                        />
                       </article>
                     );
                   })}
