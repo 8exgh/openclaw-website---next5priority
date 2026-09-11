@@ -136,6 +136,8 @@ Recipients:
 - **Team access:** an invitation/access email, also queued in the background.
 
 Login codes are sent immediately through the existing authentication route.
+If the provider rejects delivery, the login form shows an error and allows a
+retry. Failed resends leave any previously delivered, unexpired code valid.
 The scheduler and protected `POST /api/jobs/notify` and `/api/jobs/tick` endpoints
 process both project and existing booking notifications. Job requests require
 `x-claw-key: <CLAW_API_KEY>`.
@@ -143,8 +145,9 @@ process both project and existing booking notifications. Job requests require
 ### Devops email secret
 
 The existing `8exgh/devops` `deploy-openclaw-site` workflow injects SMTP credentials
-at container runtime. It uses the customer's mailbox when available; its Gmail
-fallback reads **`GMAIL_8EXAMPLES_APP_PASSWORD`** and exposes it to the app as
+at container runtime. Next 5 Priority explicitly uses the platform Gmail sender,
+even when the provisioning record includes a customer mailbox. It reads
+**`GMAIL_8EXAMPLES_APP_PASSWORD`** and exposes it to the app as
 **`SMTP_PASS`**, alongside `GMAIL_8EXAMPLES_USER` as `SMTP_USER`.
 The site uses the existing `email.ts` sender. No app password belongs in this
 repository, the browser bundle, build arguments, or deployment dispatch payload.

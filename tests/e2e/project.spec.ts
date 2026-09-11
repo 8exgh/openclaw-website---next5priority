@@ -88,6 +88,56 @@ const dialog = (page: Page) => page.getByRole("dialog");
 const close = (page: Page) =>
   dialog(page).getByRole("button", { name: "Close dialog" }).click();
 
+test("login reports mail failures, retries successfully, and retains a delivered code after a failed resend", async ({
+  page,
+}) => {
+  await page.goto("/bugs/p1-p2");
+  await page.getByLabel("Work email").fill(E2E.ownerEmail);
+  setSmtpMode("fail");
+  await page.getByRole("button", { name: "Email me a code" }).click();
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: "We couldn't send a login code" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Work email")).toBeVisible();
+  await expect(page.getByLabel("Six-digit code")).toHaveCount(0);
+  const codeRow = () => {
+    const connection = db();
+    try {
+      return connection
+        .prepare("SELECT code_hash,expires_at FROM login_codes WHERE email=?")
+        .get(E2E.ownerEmail);
+    } finally {
+      connection.close();
+    }
+  };
+  expect(codeRow()).toBeUndefined();
+  expect(mailsTo(E2E.ownerEmail)).toHaveLength(0);
+  setSmtpMode("ok");
+  await page.getByRole("button", { name: "Email me a code" }).click();
+  await expect(page.getByLabel("Six-digit code")).toBeVisible();
+  const delivered = codeRow();
+  expect(delivered).toBeTruthy();
+  const mail = mailsTo(E2E.ownerEmail).findLast((message) =>
+    /login code/.test(message.subject),
+  )!;
+  setSmtpMode("fail");
+  const response = await page.request.post("/api/auth/request-code", {
+    data: { email: E2E.ownerEmail },
+  });
+  expect(response.status()).toBe(503);
+  expect(codeRow()).toEqual(delivered);
+  expect(mailsTo(E2E.ownerEmail)).toHaveLength(1);
+  setSmtpMode("ok");
+  await page.getByLabel("Six-digit code").fill(mail.subject.match(/\d{6}/)![0]);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(
+    page.getByRole("navigation", { name: "Work type" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/bugs\/p1-p2$/);
+});
+
 test("features stay separate; next five can reorder and move with capacity enforced on server", async ({
   page,
 }) => {
