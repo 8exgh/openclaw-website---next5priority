@@ -427,7 +427,8 @@ export function ItemView({
                   ))}
                 </div>
                 <p className="subtle small">
-                  Follow to receive email about comments and new followers.
+                  Follow to receive email about status changes, comments, and
+                  new followers.
                 </p>
               </section>
               <section>

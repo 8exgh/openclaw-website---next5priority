@@ -739,6 +739,174 @@ test("assignment, comment and follow mail is queued without sending; retries and
   db.close();
 });
 
+test("status changes notify each teammate once with the actor, item, and transition, excluding the actor", async () => {
+  const db = setup();
+  const reviewer: User = {
+    ...reader,
+    id: "reviewer",
+    email: "reviewer@example.test",
+  };
+  db.prepare(
+    "INSERT INTO users (id,email,role,name,created_at) VALUES (?,?,?,?,?)",
+  ).run(
+    reviewer.id,
+    reviewer.email,
+    reviewer.role,
+    reviewer.name,
+    new Date().toISOString(),
+  );
+  for (const kind of ["feature", "bug"] as const) {
+    const task = createItem(db, admin, {
+      kind,
+      title: `${kind} status notification`,
+      implementorId: editor.id,
+      reviewerId: reviewer.id,
+    });
+    followItem(db, editor, { id: task.id, follow: true });
+    followItem(db, reader, { id: task.id, follow: true });
+    followItem(db, reviewer, { id: task.id, follow: true });
+    db.prepare("DELETE FROM project_outbox").run();
+    updateItem(db, editor, { id: task.id, state: "ready_for_development" });
+    const queued = db
+      .prepare("SELECT recipient_id, message, sent_at FROM project_outbox")
+      .all() as {
+      recipient_id: string;
+      message: string;
+      sent_at: string | null;
+    }[];
+    assert.deepEqual(
+      queued.map((row) => row.recipient_id).sort(),
+      [admin.id, reader.id, reviewer.id].sort(),
+    );
+    for (const row of queued) {
+      const mail = JSON.parse(row.message);
+      assert.equal(row.sent_at, null);
+      assert.ok(mail.subject.includes(task.title));
+      assert.match(
+        mail.subject,
+        /Changed status from Needs review to Ready for development/,
+      );
+      assert.match(mail.text, /Changed by: Sam Lee \(editor@example.test\)/);
+      assert.match(
+        mail.text,
+        /Previous status: Needs review\nNew status: Ready for development/,
+      );
+      assert.equal(mail.linkPath, `/?item=${task.publicId || task.id}`);
+      if (kind === "bug") assert.ok(mail.subject.includes(task.publicId));
+    }
+    updateItem(db, editor, {
+      id: task.id,
+      state: "ready_for_development",
+      title: "Later title",
+    });
+    assert.equal(
+      (
+        db.prepare("SELECT COUNT(*) n FROM project_outbox").get() as {
+          n: number;
+        }
+      ).n,
+      3,
+    );
+    const opts = {
+      siteUrl: "https://project.example.test",
+      now: 1000,
+      email: async () => false,
+    };
+    assert.equal((await runProjectNotifications(db, opts)).failed, 3);
+    const sent: string[] = [];
+    assert.equal(
+      (
+        await runProjectNotifications(db, {
+          ...opts,
+          now: 32000,
+          email: async (message) => {
+            assert.ok(message.text.includes(task.title));
+            assert.ok(
+              message.text.includes(
+                `https://project.example.test/?item=${task.publicId || task.id}`,
+              ),
+            );
+            sent.push(message.to);
+            return true;
+          },
+        })
+      ).sent,
+      3,
+    );
+    assert.deepEqual(
+      sent.sort(),
+      [admin.email, reader.email, reviewer.email].sort(),
+    );
+    assert.equal(
+      (await runProjectNotifications(db, { ...opts, now: 64000 })).owed,
+      0,
+    );
+    followItem(db, reader, { id: task.id, follow: false });
+    db.prepare("DELETE FROM project_outbox").run();
+    updateItem(db, editor, { id: task.id, state: "in_progress" });
+    assert.deepEqual(
+      (
+        db
+          .prepare(
+            "SELECT recipient_id FROM project_outbox ORDER BY recipient_id",
+          )
+          .all() as { recipient_id: string }[]
+      ).map((row) => row.recipient_id),
+      [admin.id, reviewer.id].sort(),
+    );
+  }
+  db.close();
+});
+
+test("changing assignment and status together preserves both notifications; failed saves queue neither", () => {
+  const db = setup();
+  const task = feature(db, "Assign and start");
+  updateItem(db, admin, {
+    id: task.id,
+    state: "in_progress",
+    implementorId: editor.id,
+  });
+  const messages = db.prepare("SELECT message FROM project_outbox").all() as {
+    message: string;
+  }[];
+  assert.equal(messages.length, 2);
+  assert.ok(
+    messages.some((row) =>
+      JSON.parse(row.message).subject.includes("Assigned you as implementor"),
+    ),
+  );
+  assert.ok(
+    messages.some((row) =>
+      JSON.parse(row.message).subject.includes(
+        "Changed status from Needs review to In progress",
+      ),
+    ),
+  );
+  const before = (
+    db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }
+  ).n;
+  // Force a failure after the item update to check the transaction also rolls
+  // back the status event and outbox rows.
+  db.exec(
+    "CREATE TRIGGER reject_status BEFORE INSERT ON project_outbox BEGIN SELECT RAISE(ABORT, 'outbox unavailable'); END",
+  );
+  assert.throws(
+    () => updateItem(db, admin, { id: task.id, state: "done" }),
+    /outbox unavailable/,
+  );
+  assert.equal(itemDetail(db, task.id)!.task.state, "in_progress");
+  assert.equal(
+    (db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }).n,
+    before,
+  );
+  assert.equal(
+    (db.prepare("SELECT COUNT(*) n FROM project_outbox").get() as { n: number })
+      .n,
+    2,
+  );
+  db.close();
+});
+
 test("unconfigured email stays owed and an expired worker lease is recovered", async () => {
   const db = setup();
   createItem(db, admin, { title: "Retry", implementorId: editor.id });

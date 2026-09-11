@@ -1,13 +1,9 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { kanbanColumns } from "../../lib/kanban";
-import {
-  userName,
-  type Task,
-  type TaskState,
-  type User,
-} from "../../lib/project-types";
+import { userName, type Task, type User } from "../../lib/project-types";
 import { Avatar, dateLabel, StateControl } from "./project-ui";
+import { useKanbanDrag } from "./use-kanban-drag";
 
 export function Kanban({
   items,
@@ -29,9 +25,7 @@ export function Kanban({
   patch: (data: object) => Promise<void>;
 }) {
   const [, refreshClock] = useState(0);
-  const [dragging, setDragging] = useState<string | null>(null);
-  const dragId = useRef<string | null>(null);
-  const [over, setOver] = useState<TaskState | null>(null);
+  const drag = useKanbanDrag({ items, canEdit, busy, patch });
   useEffect(() => {
     const timer = setInterval(() => refreshClock((tick) => tick + 1), 60_000);
     return () => clearInterval(timer);
@@ -51,21 +45,11 @@ export function Kanban({
         {canEdit && " Move a card between columns, or use its state menu."}
       </p>
       <div
-        className="kanban-scroll"
+        ref={drag.boardRef}
+        className={`kanban-scroll${drag.dragging ? " is-dragging" : ""}`}
         role="region"
         aria-label="Kanban board"
         tabIndex={0}
-        onDragOver={(event) => {
-          if (!dragId.current || !canEdit || busy) return;
-          const bounds = event.currentTarget.getBoundingClientRect();
-          const direction =
-            event.clientX < bounds.left + 60
-              ? -1
-              : event.clientX > bounds.right - 60
-                ? 1
-                : 0;
-          if (direction) event.currentTarget.scrollLeft += direction * 24;
-        }}
       >
         <div className="kanban-board">
           {columns.map((column) => {
@@ -74,36 +58,8 @@ export function Kanban({
               <section
                 key={column.state}
                 aria-label={`${column.label} column`}
-                className={`kanban-column kanban-${column.state}${over === column.state ? " drag-over" : ""}`}
-                onDragOver={(event) => {
-                  if (dragId.current && canEdit && !busy) {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    setOver(column.state);
-                  }
-                }}
-                onDragLeave={(event) => {
-                  if (
-                    !event.currentTarget.contains(event.relatedTarget as Node)
-                  )
-                    setOver(null);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setOver(null);
-                  const id = event.dataTransfer.getData("text/plain");
-                  const task = items.find((item) => item.id === id);
-                  if (
-                    canEdit &&
-                    !busy &&
-                    task &&
-                    task.id === dragId.current &&
-                    task.state !== column.state
-                  )
-                    void patch({ id, state: column.state });
-                  dragId.current = null;
-                  setDragging(null);
-                }}
+                data-kanban-state={column.state}
+                className={`kanban-column kanban-${column.state}${drag.over === column.state ? " drag-over" : ""}`}
               >
                 <div className="kanban-heading">
                   <h2>{column.label}</h2>
@@ -126,28 +82,15 @@ export function Kanban({
                     return (
                       <article
                         key={task.id}
-                        className={`kanban-card${dragging === task.id ? " dragging" : ""}`}
+                        className={`kanban-card${canEdit ? " can-drag" : ""}${drag.dragging?.id === task.id ? " dragging" : ""}`}
                         aria-label={task.title}
-                        draggable={canEdit && !busy}
-                        onDragStart={(event) => {
-                          if (
-                            !canEdit ||
-                            busy ||
-                            (event.target as HTMLElement).closest("select")
-                          ) {
-                            event.preventDefault();
-                            return;
-                          }
-                          event.dataTransfer.setData("text/plain", task.id);
-                          event.dataTransfer.effectAllowed = "move";
-                          dragId.current = task.id;
-                          setDragging(task.id);
-                        }}
-                        onDragEnd={() => {
-                          dragId.current = null;
-                          setDragging(null);
-                          setOver(null);
-                        }}
+                        onDragStart={(event) => event.preventDefault()}
+                        onPointerDown={(event) => drag.start(event, task)}
+                        onPointerMove={drag.move}
+                        onPointerUp={drag.finish}
+                        onPointerCancel={drag.reset}
+                        onLostPointerCapture={drag.reset}
+                        onClickCapture={drag.click}
                       >
                         <div className="kanban-card-meta">
                           <span
@@ -232,6 +175,15 @@ export function Kanban({
           })}
         </div>
       </div>
+      {drag.dragging && (
+        <div
+          className="kanban-drag-preview"
+          aria-hidden="true"
+          style={{ left: drag.dragging.x + 12, top: drag.dragging.y + 12 }}
+        >
+          {items.find((item) => item.id === drag.dragging!.id)?.title}
+        </div>
+      )}
     </>
   );
 }

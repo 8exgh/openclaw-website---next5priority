@@ -23,9 +23,14 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   independent: moving a parent keeps its subtasks in their current states.
   Completion does not automatically remove a feature from Next 5: move it back
   to the backlog to free its slot. The state filter includes completed work.
-- **Kanban:** six columns from Needs review through Done, combining the Next 5
+- **Kanban:** available directly at `/kanban`; refresh and browser back/forward
+  retain the selected view, including open items at `/kanban?item=<id>`.
+  Six columns from Needs review through Done combine the Next 5
   features with P1/P2 bugs. Editors move any card, including parent features,
-  by dragging it into a column or selecting a state. Done shows features and P1/P2
+  by dragging it into a column or selecting a state. Dragging near the board's
+  left/right edges scrolls to other columns; Escape cancels a drag. On touch
+  screens, use the grip to drag while the rest of the card allows vertical scrolling.
+  Done shows features and P1/P2
   bugs completed within the last 28 days, including completed features moved
   back to the backlog. Older completed items remain accessible in the lists.
 - **Details:** titles, multiline descriptions, implementor/reviewer assignments,
@@ -116,6 +121,11 @@ Recipients:
   same person receives both roles). Saving unchanged assignments sends nothing.
 - **Comment:** the creator, current implementor, reviewer, and followers,
   deduplicated and excluding the commenter.
+- **Status change:** the creator, current implementor, reviewer, and followers,
+  deduplicated and excluding the person making the change. Each email includes
+  that person's name/email, the item's title/identifier and link, and the old/new
+  status. Unchanged status saves send nothing. A separate status event preserves
+  both notifications when assignments and status change together.
 - **Follow:** a confirmation for the follower plus notifications to the creator,
   implementor, reviewer, and current followers. Repeating Follow does not resend.
   Unfollow stops future follower mail; already queued messages remain queued.

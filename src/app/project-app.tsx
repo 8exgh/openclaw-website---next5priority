@@ -23,6 +23,14 @@ import {
 } from "./components/project-ui";
 
 type CreateOptions = { kind: ItemKind; sectionId?: string; parent?: Task };
+type BoardTab = ItemKind | "kanban";
+function tabUrl(tab: BoardTab) {
+  const url = new URL(window.location.href);
+  url.pathname = tab === "kanban" ? "/kanban" : "/";
+  if (tab === "bug") url.searchParams.set("view", "bugs");
+  else url.searchParams.delete("view");
+  return url;
+}
 function TaskRow({
   task,
   users,
@@ -167,7 +175,11 @@ function TaskRow({
     </div>
   );
 }
-export function ProjectApp() {
+export function ProjectApp({
+  initialTab = "feature",
+}: {
+  initialTab?: BoardTab;
+}) {
   const [me, setMe] = useState<User | null>(null),
     [users, setUsers] = useState<User[]>([]),
     [sections, setSections] = useState<Section[]>([]),
@@ -175,7 +187,7 @@ export function ProjectApp() {
   const [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<ItemKind | "kanban">("feature"),
+  const [tab, setTab] = useState<BoardTab>(initialTab),
     [search, setSearch] = useState(""),
     [stateFilter, setStateFilter] = useState("");
   const [admin, setAdmin] = useState(false),
@@ -203,19 +215,35 @@ export function ProjectApp() {
       setError(errorMessage(e));
       setLoading(false);
     });
-    const sync = () =>
-      setSelected(
-        new URLSearchParams(window.location.search).get("item") || null,
+    const sync = () => {
+      const params = new URLSearchParams(window.location.search);
+      setSelected(params.get("item") || null);
+      setTab(
+        window.location.pathname === "/kanban"
+          ? "kanban"
+          : params.get("view") === "bugs"
+            ? "bug"
+            : "feature",
       );
+    };
     sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, [load]);
+  const selectTab = (next: BoardTab) => {
+    setTab(next);
+    setSearch("");
+    setStateFilter("");
+    const url = tabUrl(next);
+    if (url.href !== window.location.href)
+      window.history.pushState({}, "", url);
+  };
   const open = (id: string | null) => {
     setSelected(id);
     const item = items.find((item) => item.id === id || item.publicId === id);
-    if (item && tab !== "kanban") setTab(item.kind);
-    const url = new URL(window.location.href);
+    const next = item && tab !== "kanban" ? item.kind : tab;
+    setTab(next);
+    const url = tabUrl(next);
     if (id) url.searchParams.set("item", id);
     else url.searchParams.delete("item");
     window.history.pushState({}, "", url);
@@ -352,31 +380,19 @@ export function ProjectApp() {
           <nav className="board-tabs" aria-label="Work type">
             <button
               aria-pressed={tab === "feature"}
-              onClick={() => {
-                setTab("feature");
-                setSearch("");
-                setStateFilter("");
-              }}
+              onClick={() => selectTab("feature")}
             >
               Features <span>{features}</span>
             </button>
             <button
               aria-pressed={tab === "bug"}
-              onClick={() => {
-                setTab("bug");
-                setSearch("");
-                setStateFilter("");
-              }}
+              onClick={() => selectTab("bug")}
             >
               Bugs <span>{bugs}</span>
             </button>
             <button
               aria-pressed={tab === "kanban"}
-              onClick={() => {
-                setTab("kanban");
-                setSearch("");
-                setStateFilter("");
-              }}
+              onClick={() => selectTab("kanban")}
             >
               Kanban
             </button>

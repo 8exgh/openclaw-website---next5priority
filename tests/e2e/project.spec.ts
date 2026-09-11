@@ -50,8 +50,8 @@ test.beforeEach(() => {
       .run(id, email, role, name, new Date().toISOString());
   connection.close();
 });
-async function login(page: Page, email = E2E.ownerEmail) {
-  await page.goto("/");
+async function login(page: Page, email = E2E.ownerEmail, entryPath = "/") {
+  await page.goto(entryPath);
   await page.getByLabel("Work email").fill(email);
   await page.getByRole("button", { name: "Email me a code" }).click();
   await expect
@@ -64,7 +64,7 @@ async function login(page: Page, email = E2E.ownerEmail) {
   await page.getByLabel("Six-digit code").fill(mail.subject.match(/\d{6}/)![0]);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Make the next five count." }),
+    page.getByRole("navigation", { name: "Work type" }),
   ).toBeVisible();
 }
 async function sessionHeaders(page: Page) {
@@ -1046,4 +1046,274 @@ test("state labels save directly in lists and details, preserve subtasks, and re
   await expect(dialog(page).locator(".detail-toolbar .status")).toHaveText(
     "Ready for development",
   );
+});
+
+test("a Kanban card can be dragged repeatedly from the second column and back", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await login(page);
+  const task = await create(page, {
+    title: "Sequential drag",
+    sectionId: "next-five",
+  });
+  await create(page, { title: "Subtask", parentId: task.id });
+  await page.reload();
+  await page.getByRole("button", { name: "Kanban", exact: true }).click();
+  const board = page.getByRole("region", { name: "Kanban board", exact: true });
+  for (const [label, state] of [
+    ["Ready for development", "ready_for_development"],
+    ["In progress", "in_progress"],
+    ["Ready for development", "ready_for_development"],
+    ["In QA", "in_qa"],
+    ["In review", "in_review"],
+    ["Done", "done"],
+    ["In review", "in_review"],
+    ["In QA", "in_qa"],
+    ["In progress", "in_progress"],
+    ["Ready for development", "ready_for_development"],
+    ["Needs review", "needs_review"],
+  ]) {
+    await board
+      .getByRole("article", { name: task.title, exact: true })
+      .locator(".kanban-drag-handle")
+      .dragTo(
+        board.getByRole("region", { name: `${label} column`, exact: true }),
+        { targetPosition: { x: 120, y: 100 } },
+      );
+    await expect(
+      board.getByRole("region", { name: `${label} column`, exact: true }),
+    ).toContainText(task.title);
+    await expect(
+      board.getByLabel(`State for ${task.title}`, { exact: true }),
+    ).toHaveValue(state);
+    await expect(dialog(page)).toHaveCount(0);
+  }
+  await page.reload();
+  await expect(
+    board.getByLabel(`State for ${task.title}`, { exact: true }),
+  ).toHaveValue("needs_review");
+});
+
+test("Kanban drag cancels safely, recovers from failed saves, and scrolls to distant columns", async ({
+  page,
+}) => {
+  await login(page, E2E.ownerEmail, "/kanban");
+  const task = await create(page, {
+    title: "Scroll and retry",
+    sectionId: "next-five",
+  });
+  await page.reload();
+  const board = page.getByRole("region", { name: "Kanban board", exact: true });
+  const handle = board
+    .getByRole("article", { name: task.title, exact: true })
+    .locator(".kanban-drag-handle");
+  const begin = async () => {
+    await handle.scrollIntoViewIfNeeded();
+    const box = (await handle.boundingBox())!;
+    const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.down();
+    await page.mouse.move(point.x + 12, point.y);
+    await expect(page.locator(".kanban-drag-preview")).toBeVisible();
+    return point;
+  };
+  const changes: unknown[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && request.url().endsWith("/api/project"))
+      changes.push(request.postDataJSON());
+  });
+  await begin();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".kanban-drag-preview")).toHaveCount(0);
+  await page.mouse.up();
+  await begin();
+  await page.mouse.move(5, 5);
+  await page.mouse.up();
+  await expect(page.locator(".kanban-drag-preview")).toHaveCount(0);
+  await begin();
+  await page.mouse.up();
+  await expect(page.locator(".kanban-drag-preview")).toHaveCount(0);
+  expect(changes).toHaveLength(0);
+  await page.route("**/api/project", async (route) => {
+    if (route.request().method() === "PATCH")
+      await route.fulfill({
+        status: 503,
+        json: { error: "Temporary save failure" },
+      });
+    else await route.continue();
+  });
+  const ready = board.getByRole("region", {
+    name: "Ready for development column",
+    exact: true,
+  });
+  await handle.dragTo(ready, { targetPosition: { x: 120, y: 100 } });
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Temporary save failure" }),
+  ).toBeVisible();
+  await expect(
+    board.getByLabel(`State for ${task.title}`, { exact: true }),
+  ).toHaveValue("needs_review");
+  await page.unroute("**/api/project");
+  await handle.dragTo(ready, { targetPosition: { x: 120, y: 100 } });
+  await expect(
+    board.getByLabel(`State for ${task.title}`, { exact: true }),
+  ).toHaveValue("ready_for_development");
+  for (const side of ["right", "left"]) {
+    const point = await begin();
+    const bounds = (await board.boundingBox())!;
+    await page.mouse.move(
+      side === "right" ? bounds.x + bounds.width - 10 : bounds.x + 10,
+      point.y,
+      { steps: 10 },
+    );
+    await expect
+      .poll(() =>
+        board.evaluate(
+          (element, side) =>
+            side === "right"
+              ? element.scrollLeft >=
+                element.scrollWidth - element.clientWidth - 2
+              : element.scrollLeft <= 2,
+          side,
+        ),
+      )
+      .toBeTruthy();
+    await page.mouse.up();
+    await expect(
+      board.getByLabel(`State for ${task.title}`, { exact: true }),
+    ).toHaveValue(side === "right" ? "done" : "needs_review");
+  }
+  await expect(dialog(page)).toHaveCount(0);
+  expect(changes).toHaveLength(4);
+  // Exercise real touch input too: each release must permit a fresh gesture
+  // from the column the card just entered.
+  const touch = await page.context().newCDPSession(page);
+  await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  for (const [label, state] of [
+    ["Ready for development", "ready_for_development"],
+    ["In progress", "in_progress"],
+  ]) {
+    await handle.scrollIntoViewIfNeeded();
+    const source = (await handle.boundingBox())!;
+    const target = (await board
+      .getByRole("region", { name: `${label} column`, exact: true })
+      .boundingBox())!;
+    const point = {
+      x: source.x + source.width / 2,
+      y: source.y + source.height / 2,
+    };
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [point],
+    });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: point.x + 12, y: point.y }],
+    });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: target.x + 120, y: target.y + 100 }],
+    });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    await expect(
+      board.getByLabel(`State for ${task.title}`, { exact: true }),
+    ).toHaveValue(state);
+    await expect(dialog(page)).toHaveCount(0);
+  }
+  await touch.detach();
+});
+
+test("Kanban deep links survive sign-in, refresh, item details, and browser navigation", async ({
+  page,
+}) => {
+  await login(page, E2E.ownerEmail, "/kanban");
+  const board = page.getByRole("region", { name: "Kanban board", exact: true });
+  await expect(board).toBeVisible();
+  await expect(page).toHaveURL(/\/kanban$/);
+  const task = await create(page, {
+    title: "Bookmarked feature",
+    sectionId: "next-five",
+  });
+  await page.reload();
+  await expect(board).toBeVisible();
+  await board.getByRole("button", { name: task.title, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/kanban\\?item=${task.id}$`));
+  await page.reload();
+  await expect(
+    dialog(page).getByRole("heading", { name: task.title, exact: true }),
+  ).toBeVisible();
+  await close(page);
+  await expect(page).toHaveURL(/\/kanban$/);
+  await expect(board).toBeVisible();
+  await page.getByRole("button", { name: /^Features/ }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(board).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/kanban$/);
+  await expect(board).toBeVisible();
+  await page.goForward();
+  await expect(
+    page.getByRole("region", { name: "Feature backlog" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await expect(page).toHaveURL(/\/\?view=bugs$/);
+  await page.reload();
+  await expect(page.getByRole("button", { name: /^Bugs/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: "Kanban", exact: true }).click();
+  await expect(page).toHaveURL(/\/kanban$/);
+  await expect(board).toBeVisible();
+});
+
+test("list and Kanban status changes send background email identifying the actor, item, and transition", async ({
+  page,
+}) => {
+  await login(page);
+  const task = await create(page, {
+    title: "Status mail bug",
+    kind: "bug",
+    priority: "P1",
+    implementorId: "dev",
+  });
+  await expect.poll(() => mailsTo(editorEmail).length).toBe(1);
+  await page.reload();
+  await page.getByRole("button", { name: /^Bugs/ }).click();
+  await page
+    .getByLabel(`State for ${task.title}`, { exact: true })
+    .selectOption("ready_for_development");
+  await expect.poll(() => mailsTo(editorEmail).length).toBe(2);
+  const message = mailsTo(editorEmail)[1];
+  expect(message.subject).toContain(
+    `${task.publicId}: Changed status from Needs review to Ready for development`,
+  );
+  expect(message.subject).toContain(task.title);
+  expect(message.text).toContain(`Changed by: Alex Morgan (${E2E.ownerEmail})`);
+  expect(message.text).toContain(
+    "Previous status: Needs review\nNew status: Ready for development",
+  );
+  expect(message.text).toContain(`/?item=${task.publicId}`);
+  await page.getByRole("button", { name: "Kanban", exact: true }).click();
+  const board = page.getByRole("region", { name: "Kanban board", exact: true });
+  await board
+    .getByRole("article", { name: task.title, exact: true })
+    .locator(".kanban-drag-handle")
+    .dragTo(
+      board.getByRole("region", { name: "In progress column", exact: true }),
+      { targetPosition: { x: 120, y: 100 } },
+    );
+  await expect.poll(() => mailsTo(editorEmail).length).toBe(3);
+  expect(mailsTo(editorEmail)[2].subject).toContain(
+    "Changed status from Ready for development to In progress",
+  );
+  expect(
+    mailsTo(E2E.ownerEmail).filter((mail) =>
+      mail.subject.includes("Changed status"),
+    ),
+  ).toHaveLength(0);
 });

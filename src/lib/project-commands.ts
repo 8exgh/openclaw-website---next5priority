@@ -16,6 +16,8 @@ import { itemDetail, moveTree, nextBugId, ownTask } from "./project-store.ts";
 import {
   PRIORITIES,
   STATES,
+  STATE_LABELS,
+  userName,
   type ItemKind,
   type Priority,
   type TaskRecord as Task,
@@ -336,6 +338,23 @@ export function updateItem(
     });
     attach(eventId, task.id, undefined, actor.id);
     queueAssignments(db, eventId, updated, actor, old);
+    if (updated.state !== old.state) {
+      const statusEventId = appendEvent(db, "item_status_changed", {
+        task: updated,
+        previousState: old.state,
+        state: updated.state,
+        by: actor.id,
+      });
+      queueItemNotification(
+        db,
+        statusEventId,
+        updated,
+        actor,
+        itemAudience(db, updated).filter((id) => id !== actor.id),
+        `Changed status from ${STATE_LABELS[old.state]} to ${STATE_LABELS[updated.state]}`,
+        `Changed by: ${userName(actor)} (${actor.email})\nPrevious status: ${STATE_LABELS[old.state]}\nNew status: ${STATE_LABELS[updated.state]}`,
+      );
+    }
     return updated;
   });
 }
