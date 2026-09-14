@@ -1,5 +1,11 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   PRIORITIES,
   STATES,
@@ -11,6 +17,18 @@ import {
   type User,
 } from "../lib/project-types";
 import { Kanban } from "./components/kanban";
+import { BacklogFilters } from "./components/backlog-filters";
+import {
+  backlogItems,
+  defaultFilters,
+  filterList,
+  listForItem,
+  listUrl,
+  readListLocation,
+  type BoardTab,
+  type ListFilters,
+  type ListTask,
+} from "../lib/list-view";
 import { Admin, Login, Profile } from "./components/account";
 import { NewItem } from "./components/item-form";
 import { ItemView } from "./components/item-detail";
@@ -29,26 +47,6 @@ type CreateOptions = {
   parent?: Task;
   initialPriority?: Priority;
 };
-type BoardTab = "feature" | "bugs-high" | "bugs-low" | "kanban";
-const TAB_PATHS: Record<BoardTab, string> = {
-  feature: "/",
-  "bugs-high": "/bugs/p1-p2",
-  "bugs-low": "/bugs/p3-p4",
-  kanban: "/kanban",
-};
-function itemTab(item: Task): BoardTab {
-  return item.kind === "feature"
-    ? "feature"
-    : item.priority === "P1" || item.priority === "P2"
-      ? "bugs-high"
-      : "bugs-low";
-}
-function tabUrl(tab: BoardTab) {
-  const url = new URL(window.location.href);
-  url.pathname = TAB_PATHS[tab];
-  url.searchParams.delete("view");
-  return url;
-}
 function TaskRow({
   task,
   users,
@@ -59,7 +57,7 @@ function TaskRow({
   busy,
   depth = 0,
 }: {
-  task: Task;
+  task: ListTask;
   users: User[];
   canEdit: boolean;
   open: (id: string) => void;
@@ -98,6 +96,9 @@ function TaskRow({
         <button className="task-title" onClick={() => open(task.id)}>
           {task.publicId && <span className="item-id">{task.publicId}</span>}
           <span>{task.title}</span>
+          {task.filterContext && (
+            <span className="computed">Matching subtask</span>
+          )}
           {!task.leaf && (
             <span className="computed">{task.children.length} subtasks</span>
           )}
@@ -194,7 +195,7 @@ function TaskRow({
   );
 }
 export function ProjectApp({
-  initialTab = "feature",
+  initialTab = "next-five",
 }: {
   initialTab?: BoardTab;
 }) {
@@ -205,9 +206,15 @@ export function ProjectApp({
   const [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<BoardTab>(initialTab),
-    [search, setSearch] = useState(""),
-    [stateFilter, setStateFilter] = useState("");
+  const [tab, setTab] = useState<BoardTab>(initialTab);
+  const [lastListTab, setLastListTab] = useState<"next-five" | "backlog">(
+    initialTab === "backlog" ? "backlog" : "next-five",
+  );
+  const [filters, setFilters] = useState<ListFilters>(defaultFilters);
+  const search = filters.search,
+    stateFilter = filters.state;
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(76);
   const [admin, setAdmin] = useState(false),
     [profile, setProfile] = useState(false),
     [creating, setCreating] = useState<CreateOptions | null>(null),
@@ -234,18 +241,14 @@ export function ProjectApp({
       setLoading(false);
     });
     const sync = () => {
-      const params = new URLSearchParams(window.location.search);
-      setSelected(params.get("item") || null);
-      const path = window.location.pathname;
-      const next =
-        (Object.keys(TAB_PATHS) as BoardTab[]).find(
-          (key) => TAB_PATHS[key] === path,
-        ) || "feature";
-      // Existing bug bookmarks still open the high-priority group. An item
-      // link will resolve to its actual group once its data has loaded.
-      const legacy = path === "/" && params.get("view") === "bugs";
-      setTab(legacy ? "bugs-high" : next);
-      if (legacy) window.history.replaceState({}, "", tabUrl("bugs-high"));
+      const current = new URL(window.location.href);
+      const location = readListLocation(current);
+      setSelected(current.searchParams.get("item"));
+      setTab(location.tab);
+      setFilters(location.filters);
+      if (location.tab !== "kanban") setLastListTab(location.tab);
+      const url = listUrl(current, location.tab, location.filters);
+      if (url.href !== current.href) window.history.replaceState({}, "", url);
     };
     sync();
     window.addEventListener("popstate", sync);
@@ -257,19 +260,43 @@ export function ProjectApp({
       (item) => item.id === selected || item.publicId === selected,
     );
     if (!item) return;
-    const next = itemTab(item);
-    // Keep the item's URL current after creation, conversion, or a priority
-    // change, and resolve older /?item= links into the matching list.
-    if (next !== tab || window.location.pathname !== TAB_PATHS[next]) {
+    const next = listForItem(item);
+    // Item links still resolve to the current list after a move or conversion.
+    if (next !== tab) {
       setTab(next);
-      window.history.replaceState({}, "", tabUrl(next));
+      if (next !== "kanban") setLastListTab(next);
+      window.history.replaceState(
+        {},
+        "",
+        listUrl(new URL(window.location.href), next, filters),
+      );
     }
-  }, [items, selected, tab]);
+  }, [items, selected, tab, filters]);
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const measure = () =>
+      setHeaderHeight(header.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [!!me]);
+  const changeFilters = (next: ListFilters) => {
+    setFilters(next);
+    window.history.replaceState(
+      {},
+      "",
+      listUrl(new URL(window.location.href), tab, next),
+    );
+  };
   const selectTab = (next: BoardTab) => {
+    if (next === tab) return;
     setTab(next);
-    setSearch("");
-    setStateFilter("");
-    const url = tabUrl(next);
+    if (next !== "kanban") setLastListTab(next);
+    const nextFilters = { ...filters, search: "", state: "" as const };
+    setFilters(nextFilters);
+    const url = listUrl(new URL(window.location.href), next, nextFilters);
     if (url.href !== window.location.href)
       window.history.pushState({}, "", url);
   };
@@ -278,9 +305,10 @@ export function ProjectApp({
     const item = id
       ? items.find((item) => item.id === id || item.publicId === id)
       : undefined;
-    const next = item && tab !== "kanban" ? itemTab(item) : tab;
+    const next = item && tab !== "kanban" ? listForItem(item) : tab;
     setTab(next);
-    const url = tabUrl(next);
+    if (next !== "kanban") setLastListTab(next);
+    const url = listUrl(new URL(window.location.href), next, filters);
     if (id) url.searchParams.set("item", id);
     else url.searchParams.delete("item");
     window.history.pushState({}, "", url);
@@ -321,26 +349,23 @@ export function ProjectApp({
       <Login onDone={load} />
     );
   const canEdit = me.role !== "read";
-  const bugTab = tab === "bugs-high" || tab === "bugs-low";
-  const visible = sections.filter((s) =>
-    tab === "feature" ? !s.id.startsWith("bugs-") : s.id === tab,
-  );
-  const matching = (task: Task): boolean =>
-    ((!search ||
-      `${task.publicId || ""} ${task.title} ${task.description}`
-        .toLowerCase()
-        .includes(search.toLowerCase())) &&
-      (!stateFilter || task.state === stateFilter)) ||
-    task.children.some(matching);
-  const features = items.filter(
-    (t) => t.kind === "feature" && !t.parentId,
-  ).length;
-  const highBugs =
-    sections.find((s) => s.id === "bugs-high")?.tasks.length || 0;
-  const lowBugs = sections.find((s) => s.id === "bugs-low")?.tasks.length || 0;
+  const nextFive =
+    sections.find((section) => section.id === "next-five")?.tasks || [];
+  const backlog = backlogItems(sections.flatMap((section) => section.tasks));
+  const listItems = tab === "next-five" ? nextFive : backlog;
+  const activeFilters =
+    tab === "backlog"
+      ? filters
+      : { ...defaultFilters(), search, state: filters.state };
+  const visibleItems = filterList(listItems, activeFilters);
+  const filtered =
+    !!search ||
+    !!stateFilter ||
+    (tab === "backlog" &&
+      (filters.ticketClass !== "all" || filters.severities.length !== 4));
   return (
     <>
-      <header className="app-header">
+      <header ref={headerRef} className="app-header">
         <div className="identity">
           <div className="brand-mark small-mark">N5</div>
           <div>
@@ -377,67 +402,65 @@ export function ProjectApp({
           </button>
         </div>
       </header>
-      <main className={`board${tab === "kanban" ? " board-kanban" : ""}`}>
+      <main
+        className={`board${tab === "kanban" ? " board-kanban" : ""}`}
+        style={{ "--app-header-height": `${headerHeight}px` } as CSSProperties}
+      >
         <section className="hero">
           <div>
             <p className="eyebrow">
-              {tab === "kanban"
-                ? "THE WORK IN MOTION"
-                : tab === "feature"
-                  ? "PLAN WITH PURPOSE"
-                  : "KEEP QUALITY IN FOCUS"}
+              {tab === "kanban" ? "THE WORK IN MOTION" : "PLAN WITH PURPOSE"}
             </p>
             <h1>
               {tab === "kanban"
                 ? "Keep the work moving."
-                : tab === "feature"
+                : tab === "next-five"
                   ? "Make the next five count."
-                  : "Every bug, in its place."}
+                  : "Make room for what’s next."}
             </h1>
             <p>
               {tab === "kanban"
                 ? "Your next five features and urgent bugs, from first review to done."
-                : tab === "feature"
-                  ? "Choose five features to focus on. Keep everything else in the backlog, ready for its turn."
-                  : tab === "bugs-high"
-                    ? "P1 and P2 bugs, sorted by priority and newest report."
-                    : "P3 and P4 bugs, sorted by priority and newest report."}
+                : tab === "next-five"
+                  ? "Choose five features to focus on. Move them up or down as priorities change."
+                  : "Features and bugs in one backlog. Find the right work by class, severity, and state."}
             </p>
           </div>
           {canEdit && (
-            <button
-              className="primary new-item-button"
-              onClick={() =>
-                setCreating({
-                  kind: bugTab ? "bug" : "feature",
-                  sectionId: "feature-backlog",
-                  initialPriority: tab === "bugs-high" ? "P2" : "P3",
-                })
-              }
-            >
-              ＋ {bugTab ? "Report a bug" : "New feature"}
-            </button>
+            <div className="new-item-actions">
+              <button
+                className="primary"
+                onClick={() =>
+                  setCreating({ kind: "feature", sectionId: "feature-backlog" })
+                }
+              >
+                ＋ New feature
+              </button>
+              <button
+                onClick={() =>
+                  setCreating({
+                    kind: "bug",
+                    initialPriority:
+                      tab === "backlog" && !filters.severities.includes("P3")
+                        ? PRIORITIES.find((priority) =>
+                            filters.severities.includes(priority),
+                          ) || "P3"
+                        : "P3",
+                  })
+                }
+              >
+                ＋ Report a bug
+              </button>
+            </div>
           )}
         </section>
         <div className="board-toolbar">
-          <nav className="board-tabs" aria-label="Work type">
+          <nav className="board-tabs" aria-label="View">
             <button
-              aria-pressed={tab === "feature"}
-              onClick={() => selectTab("feature")}
+              aria-pressed={tab !== "kanban"}
+              onClick={() => selectTab(lastListTab)}
             >
-              Features <span>{features}</span>
-            </button>
-            <button
-              aria-pressed={tab === "bugs-high"}
-              onClick={() => selectTab("bugs-high")}
-            >
-              P1/P2 Bugs <span>{highBugs}</span>
-            </button>
-            <button
-              aria-pressed={tab === "bugs-low"}
-              onClick={() => selectTab("bugs-low")}
-            >
-              P3/P4 Bugs <span>{lowBugs}</span>
+              List
             </button>
             <button
               aria-pressed={tab === "kanban"}
@@ -446,34 +469,60 @@ export function ProjectApp({
               Kanban
             </button>
           </nav>
-          <div className="board-filters">
-            <input
-              type="search"
-              aria-label="Search items"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={
-                tab === "kanban"
-                  ? "Search priority work…"
-                  : bugTab
-                    ? "Search bugs or SAV ID…"
-                    : "Search features…"
-              }
-            />
-            <select
-              aria-label="Filter by state"
-              value={stateFilter}
-              onChange={(e) => setStateFilter(e.target.value)}
-            >
-              <option value="">All states</option>
-              {STATES.map((s) => (
-                <option key={s} value={s}>
-                  {STATE_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </div>
+          {tab !== "backlog" && (
+            <div className="board-filters">
+              <input
+                type="search"
+                aria-label="Search items"
+                value={search}
+                onChange={(event) =>
+                  changeFilters({ ...filters, search: event.target.value })
+                }
+                placeholder={
+                  tab === "kanban"
+                    ? "Search priority work…"
+                    : "Search next five…"
+                }
+              />
+              <select
+                aria-label="Filter by state"
+                value={stateFilter}
+                onChange={(event) =>
+                  changeFilters({
+                    ...filters,
+                    state: event.target.value as ListFilters["state"],
+                  })
+                }
+              >
+                <option value="">All states</option>
+                {STATES.map((state) => (
+                  <option key={state} value={state}>
+                    {STATE_LABELS[state]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
+        {tab !== "kanban" && (
+          <nav className="list-tabs" aria-label="List sections">
+            <button
+              aria-pressed={tab === "next-five"}
+              onClick={() => selectTab("next-five")}
+            >
+              Next 5 <span>{nextFive.length} / 5</span>
+            </button>
+            <button
+              aria-pressed={tab === "backlog"}
+              onClick={() => selectTab("backlog")}
+            >
+              Backlog <span>{backlog.length}</span>
+            </button>
+          </nav>
+        )}
+        {tab === "backlog" && (
+          <BacklogFilters filters={filters} change={changeFilters} />
+        )}
         <ErrorNotice error={error} />
         {tab === "kanban" ? (
           <Kanban
@@ -487,102 +536,82 @@ export function ProjectApp({
             patch={patch}
           />
         ) : (
-          <div className={`section-grid ${tab}-grid`}>
-            {visible.map((section) => {
-              const tasks = section.tasks.filter(matching);
-              return (
-                <section
-                  className="project-section"
-                  key={section.id}
-                  aria-label={section.name}
-                >
-                  <div className="section-head">
-                    <div>
-                      <h2>{section.name}</h2>
-                      <p>
-                        {section.id === "next-five"
-                          ? "Ordered by focus · move features up or down"
-                          : section.id === "feature-backlog"
-                            ? "Good ideas, waiting for their turn"
-                            : "Priority first, then newest report"}
-                      </p>
-                    </div>
-                    <span className="section-count">
-                      {section.id === "next-five"
-                        ? `${section.tasks.length} / 5`
-                        : section.tasks.length}
+          <section
+            className={`project-section ${tab === "next-five" ? "next-five-section" : "backlog-section"}`}
+            aria-label={tab === "next-five" ? "Next 5 features" : "Backlog"}
+          >
+            <div className="section-head">
+              <div>
+                <h2>{tab === "next-five" ? "Next 5" : "Backlog"}</h2>
+                <p>
+                  {tab === "next-five"
+                    ? "Ordered by focus · move features up or down"
+                    : "Features and bugs · severity first, then newest report"}
+                </p>
+              </div>
+              <span className="section-count">
+                {tab === "next-five"
+                  ? `${nextFive.length} / 5`
+                  : filtered
+                    ? `${visibleItems.length} of ${backlog.length}`
+                    : backlog.length}
+              </span>
+            </div>
+            <div className="tasks">
+              {visibleItems.length ? (
+                visibleItems.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    users={users}
+                    canEdit={canEdit}
+                    open={open}
+                    patch={patch}
+                    count={listItems.length}
+                    busy={busy}
+                  />
+                ))
+              ) : (
+                <div className="empty">
+                  <span className="empty-symbol">◇</span>
+                  <p>
+                    {filtered
+                      ? "No matching items."
+                      : tab === "next-five"
+                        ? "Your next five start here."
+                        : "Room for your next idea."}
+                  </p>
+                  {tab === "next-five" && !filtered && (
+                    <span>
+                      Move a feature from the backlog, or add one below.
                     </span>
-                  </div>
-                  <div className="tasks">
-                    {tasks.length ? (
-                      tasks.map((task) => (
-                        <TaskRow
-                          key={task.id}
-                          task={task}
-                          users={users}
-                          canEdit={canEdit}
-                          open={open}
-                          patch={patch}
-                          count={section.tasks.length}
-                          busy={busy}
-                        />
-                      ))
-                    ) : (
-                      <div className="empty">
-                        <span className="empty-symbol">
-                          {tab === "feature" ? "◇" : "✓"}
-                        </span>
-                        <p>
-                          {search || stateFilter
-                            ? "No matching items."
-                            : section.id === "next-five"
-                              ? "Your next five start here."
-                              : bugTab
-                                ? "No bugs in this priority group."
-                                : "Room for your next idea."}
-                        </p>
-                        <span>
-                          {section.id === "next-five" && !search && !stateFilter
-                            ? "Move a feature from the backlog, or add one below."
-                            : ""}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  {canEdit && tab === "feature" && (
-                    <div className="section-footer">
-                      <button
-                        disabled={
-                          busy ||
-                          (section.id === "next-five" &&
-                            section.tasks.length >= 5)
-                        }
-                        onClick={() =>
-                          setCreating({
-                            kind: "feature",
-                            sectionId: section.id,
-                          })
-                        }
-                      >
-                        ＋ Add feature
-                      </button>
-                      {section.id === "next-five" &&
-                        section.tasks.length >= 5 && (
-                          <span>All five spots are filled.</span>
-                        )}
-                    </div>
                   )}
-                </section>
-              );
-            })}
-          </div>
+                </div>
+              )}
+            </div>
+            {canEdit && tab === "next-five" && (
+              <div className="section-footer">
+                <button
+                  disabled={busy || nextFive.length >= 5}
+                  onClick={() =>
+                    setCreating({ kind: "feature", sectionId: "next-five" })
+                  }
+                >
+                  ＋ Add feature
+                </button>
+                {nextFive.length >= 5 && (
+                  <span>All five spots are filled.</span>
+                )}
+              </div>
+            )}
+          </section>
         )}
         <p className="board-footnote">
           {tab === "kanban"
-            ? "Completed cards stay visible for 28 days from completion. Earlier work remains available in Features and Bugs."
-            : tab === "feature"
+            ? "Completed cards stay visible for 28 days from completion. Earlier work remains available in List."
+            : tab === "next-five"
               ? "Change an item’s state from its label. Parent and subtask states are independent."
-              : "Changing a bug’s priority automatically places it in the correct list."}
+              : "Next 5 features have their own list. Parents marked “Matching subtask” provide context for filtered results."}
         </p>
       </main>
       {selected && !creating && (

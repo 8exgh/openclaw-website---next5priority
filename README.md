@@ -5,6 +5,15 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
 
 ## Workflows
 
+- **Views:** List and Kanban. List has Next 5 (`/`) and Backlog (`/backlog`)
+  sub-tabs. Next 5 preserves the five-feature order. Backlog combines all bugs
+  with features outside Next 5, sorted by severity and newest report.
+- **Backlog filters:** single-select ticket class (All, Features, Bugs), multiple
+  severity selections (P1–P4), search, and state. All severities start selected;
+  clearing them shows no results. Filters combine, stay visible in a sticky header,
+  and are saved in the URL for refresh and bookmarks. Matching subtasks retain
+  their ancestors with a "Matching subtask" label; unrelated children are filtered
+  out, and subtasks remain collapsed by default. Reset filters restores all items.
 - **Features:** a feature backlog and an ordered Next 5 list. Move top-level
   features between lists and move priorities up/down. The server enforces a
   maximum of five, including concurrent requests. Subtasks move with their parent.
@@ -13,12 +22,11 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   list placement; all five features remain eligible for Kanban at any priority.
   Subtasks start collapsed in list views. Each parent has an expand/collapse
   button, including nested parents; item details still show direct subtasks.
-- **Bugs:** separate P1/P2 Bugs (`/bugs/p1-p2`) and P3/P4 Bugs (`/bugs/p3-p4`)
-  tabs, each with its own count and a URL that survives refresh and sign-in.
-  New reports default to P2 in the first tab and P3 in the second; choosing
-  another priority routes the item to its matching tab. Existing `/?item=<id>`
-  links still work, and `/?view=bugs` opens P1/P2. Both lists sort by priority
-  (P1 first) and date logged descending. Changing priority moves a bug immediately.
+- **Bugs:** Report a bug is available separately from New feature. Bugs live in
+  Backlog; changing their priority updates sorting and active filter results.
+  Legacy `/bugs/p1-p2`, `/bugs/p3-p4`, and `/?view=bugs` bookmarks open Backlog with
+  the corresponding class and severity filters. Existing `/?item=<id>` links
+  still work and resolve to the appropriate list.
   Every bug gets a permanent, incrementing `SAV-000001` style identifier; deleted
   identifiers are never reused. Bugs are independent items; use links to connect them.
 - **States:** Needs review → Ready for development → In progress → In QA →
@@ -51,7 +59,7 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
 - **Conversion:** use Convert to bug / Convert to feature in item details.
   Conversion keeps the item ID, priority, displayed state, completed date,
   comments, attachments, assignments, followers, and existing links. A feature
-  becoming a bug gets a SAV ID and moves into the matching priority list; any
+  becoming a bug gets a SAV ID and enters Backlog; any
   existing SAV ID is retained across future conversions. A bug becoming a feature
   goes into the backlog. Direct child features become backlog roots, keeping their
   descendants, and Related to links preserve the former parent/child connections.
