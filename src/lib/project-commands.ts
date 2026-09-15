@@ -14,10 +14,12 @@ import {
 } from "./project-notifications.ts";
 import { itemDetail, moveTree, nextBugId, ownTask } from "./project-store.ts";
 import {
+  EFFORTS,
   PRIORITIES,
   STATES,
   STATE_LABELS,
   userName,
+  type Effort,
   type ItemKind,
   type Priority,
   type TaskRecord as Task,
@@ -49,6 +51,16 @@ function enumValue<T extends string>(
 ): T {
   if (!values.includes(value as T)) throw new ProjectError(`Invalid ${label}.`);
   return value as T;
+}
+function effortValue(value: unknown): Effort | null {
+  if (value === null || value === undefined || value === "") return null;
+  const effort =
+    typeof value === "string" && value.trim() ? Number(value) : value;
+  if (!EFFORTS.includes(effort as Effort))
+    throw new ProjectError(
+      "Effort must be a whole number from 1 (low) to 5 (high).",
+    );
+  return effort as Effort;
 }
 function assignee(db: Database.Database, value: unknown): string | null {
   if (value === null || value === "" || value === undefined) return null;
@@ -153,6 +165,7 @@ export function createItem(
         "Only features can have subtasks. Use links to connect bugs.",
       );
     const priority = enumValue(input.priority ?? "P3", PRIORITIES, "priority");
+    const effort = effortValue(input.effort);
     const sectionId =
       kind === "bug"
         ? priority === "P1" || priority === "P2"
@@ -175,7 +188,7 @@ export function createItem(
       )
       .get(sectionId, parent?.id ?? null) as { position: number };
     db.prepare(
-      `INSERT INTO tasks (id,section_id,parent_id,title,state,position,created_at,updated_at,kind,description,public_id,priority,implementor_id,reviewer_id,created_by,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO tasks (id,section_id,parent_id,title,state,position,created_at,updated_at,kind,description,public_id,priority,implementor_id,reviewer_id,created_by,completed_at,effort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       id,
       sectionId,
@@ -193,6 +206,7 @@ export function createItem(
       reviewerId,
       actor.id,
       state === "done" ? now : null,
+      effort,
     );
     const task = ownTask(db, id)!;
     const eventId = appendEvent(db, "item_created", { task, by: actor.id });
@@ -258,6 +272,7 @@ export function updateItem(
             ? "bugs-high"
             : "bugs-low";
     }
+    if (input.effort !== undefined) task.effort = effortValue(input.effort);
     if (input.implementorId !== undefined)
       task.implementorId = assignee(db, input.implementorId);
     if (input.reviewerId !== undefined)
@@ -287,12 +302,13 @@ export function updateItem(
           : task.updatedAt
         : null;
     db.prepare(
-      "UPDATE tasks SET title=?,description=?,state=?,priority=?,implementor_id=?,reviewer_id=?,section_id=?,position=?,updated_at=?,completed_at=? WHERE id=?",
+      "UPDATE tasks SET title=?,description=?,state=?,priority=?,effort=?,implementor_id=?,reviewer_id=?,section_id=?,position=?,updated_at=?,completed_at=? WHERE id=?",
     ).run(
       task.title,
       task.description,
       task.state,
       task.priority,
+      task.effort,
       task.implementorId,
       task.reviewerId,
       task.sectionId,

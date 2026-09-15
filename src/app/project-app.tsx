@@ -17,7 +17,7 @@ import {
   type User,
 } from "../lib/project-types";
 import { Kanban } from "./components/kanban";
-import { BacklogFilters } from "./components/backlog-filters";
+import { BacklogFilters, MineFilter } from "./components/backlog-filters";
 import {
   backlogItems,
   defaultFilters,
@@ -36,6 +36,7 @@ import {
   api,
   Avatar,
   command,
+  EffortBadge,
   ErrorNotice,
   errorMessage,
   StateControl,
@@ -129,6 +130,7 @@ function TaskRow({
             {task.priority}
           </span>
         )}
+        <EffortBadge effort={task.effort} />
         {canEdit && task.kind === "feature" && !task.parentId && (
           <div className="row-actions">
             {task.sectionId === "next-five" && (
@@ -356,11 +358,12 @@ export function ProjectApp({
   const activeFilters =
     tab === "backlog"
       ? filters
-      : { ...defaultFilters(), search, state: filters.state };
-  const visibleItems = filterList(listItems, activeFilters);
+      : { ...defaultFilters(), search, state: filters.state, mine: filters.mine };
+  const visibleItems = filterList(listItems, activeFilters, me.id);
   const filtered =
     !!search ||
     !!stateFilter ||
+    filters.mine ||
     (tab === "backlog" &&
       (filters.ticketClass !== "all" || filters.severities.length !== 4));
   return (
@@ -501,6 +504,7 @@ export function ProjectApp({
                   </option>
                 ))}
               </select>
+              <MineFilter filters={filters} change={changeFilters} />
             </div>
           )}
         </div>
@@ -532,6 +536,8 @@ export function ProjectApp({
             busy={busy}
             search={search}
             stateFilter={stateFilter}
+            mine={filters.mine}
+            userId={me.id}
             open={open}
             patch={patch}
           />

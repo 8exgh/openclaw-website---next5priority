@@ -84,6 +84,7 @@ test("legacy tasks migrate without losing titles, descendants, states, or excess
   assert.equal(itemDetail(db, "f5")!.task.state, "in_qa");
   assert.equal(itemDetail(db, "b2")!.links[0].other.id, "b1");
   assert.equal(itemDetail(db, "b1")!.task.publicId, "SAV-000001");
+  assert.equal(itemDetail(db, "b1")!.task.effort, null);
   assert.equal(itemDetail(db, "b2")!.task.parentId, null);
   const events = (
     db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }
@@ -179,6 +180,86 @@ test("feature priorities validate independently of list placement, rank, and par
   }
   assert.equal(itemDetail(db, first.id)!.task.title, "First");
   db.close();
+});
+
+test("effort is optional, accepts 1 to 5 as numbers or digits, rejects anything else, and survives edits and conversion", () => {
+  const db = setup();
+  const item = feature(db, "Sized");
+  assert.equal(item.effort, null);
+  assert.equal(createItem(db, admin, { title: "Digit", effort: "4" }).effort, 4);
+  assert.equal(createItem(db, admin, { title: "Number", effort: 1 }).effort, 1);
+  assert.equal(
+    createItem(db, admin, { title: "Blank", effort: "" }).effort,
+    null,
+  );
+  assert.equal(
+    createItem(db, admin, { title: "Null", effort: null }).effort,
+    null,
+  );
+  for (const effort of [0, 6, 2.5, "abc", "1.5", true, [], {}]) {
+    assert.throws(
+      () => createItem(db, admin, { title: "Invalid", effort }),
+      /Effort must be a whole number from 1 \(low\) to 5 \(high\)/,
+    );
+    assert.throws(
+      () => updateItem(db, admin, { id: item.id, title: "Rollback", effort }),
+      /Effort must be/,
+    );
+  }
+  assert.equal(itemDetail(db, item.id)!.task.title, "Sized");
+  updateItem(db, admin, { id: item.id, effort: 5 });
+  assert.equal(itemDetail(db, item.id)!.task.effort, 5);
+  updateItem(db, admin, { id: item.id, title: "Renamed" });
+  assert.equal(itemDetail(db, item.id)!.task.effort, 5);
+  assert.equal(convertItem(db, admin, { id: item.id, kind: "bug" }).effort, 5);
+  assert.equal(
+    convertItem(db, admin, { id: item.id, kind: "feature" }).effort,
+    5,
+  );
+  updateItem(db, admin, { id: item.id, effort: null });
+  assert.equal(itemDetail(db, item.id)!.task.effort, null);
+  assert.deepEqual(
+    (
+      db
+        .prepare(
+          "SELECT data FROM events WHERE type='item_updated' ORDER BY rowid",
+        )
+        .all() as { data: string }[]
+    ).map((row) => JSON.parse(row.data).task.effort),
+    [5, 5, null],
+  );
+  db.close();
+});
+
+test("existing installations gain the effort column once, leaving old items unset", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "n5-effort-"));
+  const file = path.join(dir, "site.db");
+  let db = setup(file);
+  const existing = feature(db, "Before effort");
+  db.exec(
+    "ALTER TABLE tasks DROP COLUMN effort; DELETE FROM project_migrations WHERE version=5",
+  );
+  db.close();
+  db = projectDb(file);
+  assert.equal(itemDetail(db, existing.id)!.task.effort, null);
+  assert.deepEqual(
+    db.prepare("SELECT version FROM project_migrations ORDER BY version").all(),
+    [1, 2, 3, 4, 5].map((version) => ({ version })),
+  );
+  updateItem(db, admin, { id: existing.id, effort: 2 });
+  assert.equal(itemDetail(db, existing.id)!.task.effort, 2);
+  const events = (
+    db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }
+  ).n;
+  db.close();
+  db = projectDb(file);
+  assert.equal(
+    (db.prepare("SELECT COUNT(*) n FROM events").get() as { n: number }).n,
+    events,
+  );
+  assert.equal(itemDetail(db, existing.id)!.task.effort, 2);
+  db.close();
+  fs.rmSync(dir, { recursive: true });
 });
 
 test("existing features receive P3 once without changing history, completion dates, or explicit priorities", () => {

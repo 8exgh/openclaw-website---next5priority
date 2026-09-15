@@ -19,7 +19,7 @@ export type { Role, TaskState, User } from "./project-types.ts";
 const BASE_TASK_SELECT = `SELECT id,public_id publicId,kind,section_id sectionId,parent_id parentId,title,description,state,state ownState,priority,implementor_id implementorId,reviewer_id reviewerId,created_by createdBy,position,created_at createdAt,updated_at updatedAt FROM tasks`;
 export const TASK_SELECT = BASE_TASK_SELECT.replace(
   " FROM tasks",
-  ",completed_at completedAt FROM tasks",
+  ",completed_at completedAt,effort FROM tasks",
 );
 export const USER_SELECT =
   "SELECT id,email,role,name,avatar_id avatarId FROM users";
@@ -187,6 +187,15 @@ export function projectDb(dbPath?: string) {
       );
     }
     db.prepare("INSERT INTO project_migrations VALUES (2)").run();
+  }).immediate();
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM project_migrations WHERE version=5").get())
+      return;
+    // Effort (1 low to 5 high) is optional and starts unset for existing work.
+    // The column is added before migrations 3 and 4 because they read full
+    // task rows, which include effort on a fresh database.
+    db.exec("ALTER TABLE tasks ADD COLUMN effort INTEGER");
+    db.prepare("INSERT INTO project_migrations VALUES (5)").run();
   }).immediate();
   db.transaction(() => {
     if (db.prepare("SELECT 1 FROM project_migrations WHERE version=3").get())

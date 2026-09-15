@@ -4,6 +4,7 @@ import {
   PRIORITIES,
   STATES,
   STATE_LABELS,
+  type Effort,
   type ItemKind,
   type Priority,
   type Task,
@@ -12,6 +13,7 @@ import {
 } from "../../lib/project-types";
 import {
   command,
+  EffortSelect,
   ErrorNotice,
   errorMessage,
   FilePicker,
@@ -39,6 +41,7 @@ export function NewItem({
   const [description, setDescription] = useState("");
   const [state, setState] = useState<TaskState>("needs_review");
   const [priority, setPriority] = useState<Priority>(initialPriority);
+  const [effort, setEffort] = useState<Effort | null>(null);
   const [implementorId, setImplementor] = useState("");
   const [reviewerId, setReviewer] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -58,6 +61,7 @@ export function NewItem({
           description,
           state,
           priority,
+          effort,
           sectionId,
           parentId: parent?.id,
           implementorId,
@@ -122,7 +126,7 @@ export function NewItem({
             />
           </label>
           <FilePicker files={files} setFiles={setFiles} disabled={busy} />
-          <div className="field-grid">
+          <div className="field-grid field-grid-three">
             <label className="field">
               State
               <select
@@ -147,6 +151,7 @@ export function NewItem({
                 ))}
               </select>
             </label>
+            <EffortSelect value={effort} onChange={setEffort} />
           </div>
           <div className="field-grid">
             <PersonSelect

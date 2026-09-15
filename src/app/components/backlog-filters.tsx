@@ -2,6 +2,28 @@
 import { PRIORITIES, STATES, STATE_LABELS } from "../../lib/project-types";
 import { defaultFilters, type ListFilters } from "../../lib/list-view";
 
+export function MineFilter({
+  filters,
+  change,
+  className = "",
+}: {
+  filters: ListFilters;
+  change: (filters: ListFilters) => void;
+  className?: string;
+}) {
+  return (
+    <label
+      className={`filter-toggle${filters.mine ? " selected" : ""}${className ? ` ${className}` : ""}`}
+    >
+      <input
+        type="checkbox"
+        checked={filters.mine}
+        onChange={(event) => change({ ...filters, mine: event.target.checked })}
+      />
+      My tickets
+    </label>
+  );
+}
 export function BacklogFilters({
   filters,
   change,
@@ -12,7 +34,7 @@ export function BacklogFilters({
   return (
     <div className="backlog-filters" role="region" aria-label="Backlog filters">
       <div className="backlog-filter-controls">
-        <label className="filter-field">
+        <label className="filter-field filter-class">
           Ticket class
           <select
             aria-label="Ticket class"
@@ -68,7 +90,7 @@ export function BacklogFilters({
             }
           />
         </label>
-        <label className="filter-field">
+        <label className="filter-field filter-state">
           State
           <select
             aria-label="Filter by state"
@@ -88,6 +110,11 @@ export function BacklogFilters({
             ))}
           </select>
         </label>
+        <MineFilter
+          filters={filters}
+          change={change}
+          className="filter-mine"
+        />
       </div>
       <div className="backlog-filter-summary">
         <span>

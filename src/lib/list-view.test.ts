@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ancestors,
+  assignedTo,
   backlogItems,
   defaultFilters,
   filterList,
@@ -22,6 +24,7 @@ function task(id: string, overrides: Partial<Task> = {}): Task {
     state: "needs_review",
     ownState: "needs_review",
     priority: "P3",
+    effort: null,
     implementorId: null,
     reviewerId: null,
     createdBy: null,
@@ -168,4 +171,85 @@ test("old bug URLs become filtered backlog links and Kanban ignores class and se
   );
   assert.equal(parsed.tab, "kanban");
   assert.deepEqual(parsed.filters, defaultFilters());
+});
+
+test("My tickets keeps work assigned to the signed-in person as implementor or reviewer, with subtask context", () => {
+  const items = [
+    task("implementing", { implementorId: "me" }),
+    task("reviewing", { kind: "bug", priority: "P2", reviewerId: "me" }),
+    task("theirs", { implementorId: "them", reviewerId: "them" }),
+    task("parent", {
+      leaf: false,
+      children: [task("child", { parentId: "parent", reviewerId: "me" })],
+    }),
+  ];
+  const mine = { ...defaultFilters(), mine: true };
+  const visible = filterList(items, mine, "me");
+  assert.deepEqual(
+    visible.map((item) => item.id),
+    ["implementing", "reviewing", "parent"],
+  );
+  assert.equal(visible[2].filterContext, true);
+  assert.deepEqual(
+    visible[2].children.map((item) => item.id),
+    ["child"],
+  );
+  assert.deepEqual(
+    filterList(items, mine, "them").map((item) => item.id),
+    ["theirs"],
+  );
+  assert.equal(filterList(items, mine, null).length, 0);
+  assert.equal(filterList(items, mine).length, 0);
+  assert.equal(filterList(items, defaultFilters(), "me").length, 4);
+  assert.equal(
+    filterList(items, { ...mine, ticketClass: "bug" }, "me")
+      .map((item) => item.id)
+      .join(),
+    "reviewing",
+  );
+  assert.equal(assignedTo(items[0], "me"), true);
+  assert.equal(assignedTo(items[1], "me"), true);
+  assert.equal(assignedTo(items[2], "me"), false);
+  assert.equal(assignedTo(items[0], undefined), false);
+});
+
+test("the My tickets flag round trips through every view's URL", () => {
+  for (const tab of ["next-five", "backlog", "kanban"] as const) {
+    const url = listUrl(new URL("https://app.test/?item=abc"), tab, {
+      ...defaultFilters(),
+      mine: true,
+    });
+    assert.equal(url.searchParams.get("mine"), "1");
+    assert.equal(url.searchParams.get("item"), "abc");
+    assert.deepEqual(readListLocation(url), {
+      tab,
+      filters: { ...defaultFilters(), mine: true },
+    });
+    const off = listUrl(url, tab, defaultFilters());
+    assert.equal(off.searchParams.has("mine"), false);
+    assert.equal(readListLocation(off).filters.mine, false);
+  }
+});
+
+test("ancestors list a nested item's parents from the root down and stop at gaps or cycles", () => {
+  const root = task("root", { leaf: false });
+  const middle = task("middle", { parentId: "root", leaf: false });
+  const leaf = task("leaf", { parentId: "middle" });
+  const orphan = task("orphan", { parentId: "missing" });
+  assert.deepEqual(
+    ancestors([leaf, middle, root, orphan], leaf).map((item) => item.id),
+    ["root", "middle"],
+  );
+  assert.deepEqual(
+    ancestors([leaf, middle, root], middle).map((item) => item.id),
+    ["root"],
+  );
+  assert.deepEqual(ancestors([root], root), []);
+  assert.deepEqual(ancestors([orphan], orphan), []);
+  const a = task("a", { parentId: "b" }),
+    b = task("b", { parentId: "a" });
+  assert.deepEqual(
+    ancestors([a, b], a).map((item) => item.id),
+    ["b"],
+  );
 });

@@ -13,6 +13,7 @@ export type ListFilters = {
   severities: Priority[];
   search: string;
   state: TaskState | "";
+  mine: boolean;
 };
 export type ListTask = Task & { filterContext?: boolean; children: ListTask[] };
 export const defaultFilters = (): ListFilters => ({
@@ -20,6 +21,7 @@ export const defaultFilters = (): ListFilters => ({
   severities: [...PRIORITIES],
   search: "",
   state: "",
+  mine: false,
 });
 const paths: Record<BoardTab, string> = {
   "next-five": "/",
@@ -61,13 +63,14 @@ export function readListLocation(url: URL): {
   filters.search = params.get("q") || "";
   const state = params.get("state");
   filters.state = STATES.find((value) => value === state) || "";
+  filters.mine = params.get("mine") === "1";
   return { tab, filters };
 }
 
 export function listUrl(current: URL, tab: BoardTab, filters: ListFilters) {
   const url = new URL(current);
   url.pathname = paths[tab];
-  for (const key of ["view", "class", "severity", "q", "state"])
+  for (const key of ["view", "class", "severity", "q", "state", "mine"])
     url.searchParams.delete(key);
   if (tab === "backlog") {
     if (filters.ticketClass !== "all")
@@ -85,7 +88,29 @@ export function listUrl(current: URL, tab: BoardTab, filters: ListFilters) {
   }
   if (filters.search) url.searchParams.set("q", filters.search);
   if (filters.state) url.searchParams.set("state", filters.state);
+  if (filters.mine) url.searchParams.set("mine", "1");
   return url;
+}
+
+export function assignedTo(task: Task, userId: string | null | undefined) {
+  return (
+    !!userId && (task.implementorId === userId || task.reviewerId === userId)
+  );
+}
+
+/** Ancestors of an item from its root down to its direct parent. */
+export function ancestors(items: Task[], task: Task): Task[] {
+  const chain: Task[] = [];
+  const seen = new Set<string>([task.id]);
+  let parentId = task.parentId;
+  while (parentId && !seen.has(parentId)) {
+    const parent = items.find((item) => item.id === parentId);
+    if (!parent) break;
+    seen.add(parent.id);
+    chain.unshift(parent);
+    parentId = parent.parentId;
+  }
+  return chain;
 }
 
 export function listForItem(item: Task): BoardTab {
@@ -109,14 +134,19 @@ export function backlogItems(items: Task[]): Task[] {
     );
 }
 
-export function filterList(items: Task[], filters: ListFilters): ListTask[] {
+export function filterList(
+  items: Task[],
+  filters: ListFilters,
+  userId: string | null = null,
+): ListTask[] {
   const query = filters.search.trim().toLowerCase();
   return items.flatMap((item) => {
-    const children = filterList(item.children, filters);
+    const children = filterList(item.children, filters, userId);
     const matches =
       (filters.ticketClass === "all" || item.kind === filters.ticketClass) &&
       filters.severities.includes(item.priority) &&
       (!filters.state || item.state === filters.state) &&
+      (!filters.mine || assignedTo(item, userId)) &&
       (!query ||
         `${item.publicId || ""} ${item.title} ${item.description}`
           .toLowerCase()

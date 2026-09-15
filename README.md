@@ -9,11 +9,19 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   sub-tabs. Next 5 preserves the five-feature order. Backlog combines all bugs
   with features outside Next 5, sorted by severity and newest report.
 - **Backlog filters:** single-select ticket class (All, Features, Bugs), multiple
-  severity selections (P1–P4), search, and state. All severities start selected;
-  clearing them shows no results. Filters combine, stay visible in a sticky header,
-  and are saved in the URL for refresh and bookmarks. Matching subtasks retain
-  their ancestors with a "Matching subtask" label; unrelated children are filtered
-  out, and subtasks remain collapsed by default. Reset filters restores all items.
+  severity selections (P1–P4), search, state, and My tickets. All severities start
+  selected; clearing them shows no results. Filters combine, stay visible in a
+  sticky header, and are saved in the URL for refresh and bookmarks. Matching
+  subtasks retain their ancestors with a "Matching subtask" label; unrelated
+  children are filtered out, and subtasks remain collapsed by default. Reset
+  filters restores all items.
+- **My tickets:** available on Next 5, Backlog, and Kanban. It keeps items where
+  the signed-in person is the implementor or reviewer. A parent whose subtask is
+  assigned to you stays visible as context, labelled "Matching subtask". The
+  choice follows you between views and is saved in the URL as `mine=1`.
+- **Effort:** every feature, subtask, and bug has an optional effort from 1 (low)
+  to 5 (high), set when creating an item or editing its details. Lists, Kanban
+  cards, and item details show it as a five-dot gauge; existing items start unset.
 - **Features:** a feature backlog and an ordered Next 5 list. Move top-level
   features between lists and move priorities up/down. The server enforces a
   maximum of five, including concurrent requests. Subtasks move with their parent.
@@ -45,13 +53,16 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   Done shows features and P1/P2
   bugs completed within the last 28 days, including completed features moved
   back to the backlog. Older completed items remain accessible in the lists.
-- **Details:** titles, multiline descriptions, implementor/reviewer assignments,
-  comments and attachments. Descriptions display as text in view mode and as
-  textareas when editing. Items have shareable `/?item=<id>` links; bugs also
-  accept their SAV identifier.
+- **Details:** titles, multiline descriptions, effort, implementor/reviewer
+  assignments, comments and attachments. Descriptions display as text in view
+  mode and as textareas when editing. Items have shareable `/?item=<id>` links;
+  bugs also accept their SAV identifier. Subtasks show a "Part of" trail with
+  every ancestor from the root feature down; each name opens that item.
 - **Relationships:** connect a bug to a feature or another bug with Related to
   or Caused by. Links appear at both ends; the opposite end of Caused by shows
-  Causes. Related to can also be added from a feature to a bug.
+  Causes. Related to can also be added from a feature to a bug. The Link to item
+  field is searchable: type part of a title or SAV ID, then pick a match with the
+  mouse or the arrow keys and Enter.
 - **People:** display names and two initials, with an uploaded profile photo
   replacing initials. Administrators add teammates and manage access/API keys.
   Readers can view, download attachments, follow, and update their own profile;
@@ -188,12 +199,14 @@ and its compatibility alias `/api/v1/tasks`.
   `{ detail: { task, attachments, comments, followers, links } }`.
 - `POST`: create a feature or bug. Fields: `kind` (`feature`/`bug`), `title`,
   `description`, `state`, `implementorId`, `reviewerId`, feature `sectionId`
-  (`feature-backlog`/`next-five`), optional feature `parentId`, and `priority`
-  (`P1`/`P2`/`P3`/`P4`) for either kind.
-  Defaults: feature, backlog, Needs review, and P3.
+  (`feature-backlog`/`next-five`), optional feature `parentId`, `priority`
+  (`P1`/`P2`/`P3`/`P4`) for either kind, and optional `effort` (a whole number
+  from 1 to 5, or `null` to leave it unset).
+  Defaults: feature, backlog, Needs review, P3, and no effort.
 - `PATCH`: supply `id` and changed fields. Set a root feature's `sectionId` to
   move it; set its zero-based `position` to reorder within Next 5. Set assignment
-  fields to `null` to unassign. A bug's section is always derived from its priority.
+  fields or `effort` to `null` to clear them. A bug's section is always derived
+  from its priority.
 - `POST { action: "comment", id, body }`: add a comment and/or attachments.
 - `POST { action: "convert", id, kind: "bug"|"feature" }`: convert an existing
   item without recreating it. Repeating the same target kind is a no-op.
@@ -228,7 +241,8 @@ behavior alongside existing booking/payment/chat tests.
 Browser tests run the production standalone build with local SMTP and Rocket.Chat
 mocks. No test mail reaches real recipients. The project specs cover login,
 feature ordering/capacity, bug triage, details, attachments, links, notifications,
-profiles, read-only authorization, and mobile layout. Booking regression specs
+profiles, read-only authorization, mobile layout, the My tickets filter, effort,
+link search, and parent trails. Booking regression specs
 exercise the original booking module at `/book`.
 Kanban checks cover scope, completion cutoffs, state changes, drag-and-drop,
 parent rollups, and mobile scrolling.

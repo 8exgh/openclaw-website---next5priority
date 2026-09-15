@@ -413,7 +413,8 @@ test("bugs support multiline details, assignments, comments, inline images, down
     .selectOption("caused_by");
   await dialog(page)
     .getByRole("combobox", { name: "Link to item", exact: true })
-    .selectOption(feature.id);
+    .fill("csv exp");
+  await dialog(page).getByRole("option", { name: /CSV export/ }).click();
   await dialog(page)
     .getByRole("button", { name: "Add link", exact: true })
     .click();
@@ -1634,4 +1635,260 @@ test("legacy bug bookmarks open a filtered Backlog for readers and preserve item
       .getByRole("navigation", { name: "View", exact: true })
       .getByRole("button"),
   ).toHaveText(["List", "Kanban"]);
+});
+
+test("My tickets limits Next 5, Backlog, and Kanban to work assigned to the signed-in person, keeping subtask context", async ({
+  page,
+}) => {
+  await login(page);
+  await create(page, {
+    title: "Owner implements",
+    sectionId: "next-five",
+    implementorId: "owner",
+  });
+  await create(page, {
+    title: "Dev implements",
+    sectionId: "next-five",
+    implementorId: "dev",
+    reviewerId: "reader",
+  });
+  const parent = await create(page, { title: "Unassigned parent" });
+  await create(page, {
+    title: "Owner reviews subtask",
+    parentId: parent.id,
+    reviewerId: "owner",
+  });
+  await create(page, { title: "Nobody's feature" });
+  await create(page, {
+    title: "Owner reviews bug",
+    kind: "bug",
+    priority: "P1",
+    reviewerId: "owner",
+  });
+  await create(page, {
+    title: "Dev's bug",
+    kind: "bug",
+    priority: "P2",
+    implementorId: "dev",
+  });
+  await page.reload();
+  const mine = page.getByRole("checkbox", { name: "My tickets", exact: true });
+  const nextFive = page.getByRole("region", {
+    name: "Next 5 features",
+    exact: true,
+  });
+  await expect(nextFive.locator(".task-title")).toHaveCount(2);
+  await mine.check();
+  await expect(nextFive.locator(".task-title")).toHaveText([
+    "Owner implements",
+  ]);
+  await expect(page).toHaveURL(/mine=1/);
+  await page.reload();
+  await expect(mine).toBeChecked();
+  await expect(nextFive.locator(".task-title")).toHaveText([
+    "Owner implements",
+  ]);
+  await showBacklog(page);
+  const backlog = page.getByRole("region", { name: "Backlog", exact: true });
+  await expect(mine).not.toBeChecked();
+  await expect(backlog.locator(".task-title")).toHaveCount(4);
+  await mine.check();
+  await expect(backlog.locator(".task-title")).toHaveCount(2);
+  await expect(backlog).toContainText("Owner reviews bug");
+  await expect(backlog).toContainText("Unassigned parent");
+  await expect(backlog).toContainText("Matching subtask");
+  await expect(backlog).not.toContainText("Dev's bug");
+  await expect(backlog).not.toContainText("Nobody's feature");
+  await page
+    .getByRole("button", { name: "Expand subtasks for Unassigned parent" })
+    .click();
+  await expect(backlog.locator(".task-title")).toHaveCount(3);
+  await expect(backlog).toContainText("Owner reviews subtask");
+  await expect(page).toHaveURL(/\/backlog\?.*mine=1/);
+  await page
+    .getByRole("navigation", { name: "View", exact: true })
+    .getByRole("button", { name: "Kanban", exact: true })
+    .click();
+  await expect(mine).toBeChecked();
+  const board = page.getByRole("region", { name: "Kanban board" });
+  await expect(board.locator(".kanban-card")).toHaveCount(2);
+  await expect(board).toContainText("Owner implements");
+  await expect(board).toContainText("Owner reviews bug");
+  await expect(board).not.toContainText("Dev implements");
+  await expect(board).not.toContainText("Dev's bug");
+  await mine.uncheck();
+  await expect(board.locator(".kanban-card")).toHaveCount(4);
+  await expect(page).not.toHaveURL(/mine=1/);
+});
+
+test("effort is optional, edited from 1 to 5, validated by the API, and shown in details, lists, and Kanban", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("button", { name: "New feature" }).click();
+  await dialog(page)
+    .getByRole("textbox", { name: "Title", exact: true })
+    .fill("Sized feature");
+  const effort = dialog(page).getByRole("combobox", {
+    name: "Effort",
+    exact: true,
+  });
+  await expect(effort).toHaveValue("");
+  await expect(effort.locator("option")).toHaveText([
+    "Not set",
+    "1 · Low",
+    "2 · Light",
+    "3 · Medium",
+    "4 · Heavy",
+    "5 · High",
+  ]);
+  await effort.selectOption("4");
+  await dialog(page).getByRole("button", { name: "Create feature" }).click();
+  await expect(
+    dialog(page).getByRole("img", { name: "Effort 4 of 5", exact: true }),
+  ).toBeVisible();
+  await dialog(page)
+    .getByRole("button", { name: "Edit item", exact: true })
+    .click();
+  await expect(effort).toHaveValue("4");
+  await effort.selectOption("");
+  await dialog(page).getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog(page).getByRole("img", { name: /Effort/ })).toHaveCount(
+    0,
+  );
+  await dialog(page)
+    .getByRole("button", { name: "Edit item", exact: true })
+    .click();
+  await effort.selectOption("2");
+  await dialog(page).getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    dialog(page).getByRole("img", { name: "Effort 2 of 5", exact: true }),
+  ).toBeVisible();
+  await close(page);
+  await showBacklog(page);
+  await expect(
+    page
+      .getByRole("region", { name: "Backlog", exact: true })
+      .locator(".task-row")
+      .filter({ hasText: "Sized feature" })
+      .getByRole("img", { name: "Effort 2 of 5", exact: true }),
+  ).toBeVisible();
+  for (const invalid of [0, 6, 2.5, "abc"]) {
+    const response = await page.request.post("/api/project", {
+      headers: await sessionHeaders(page),
+      data: { title: "Invalid", effort: invalid },
+    });
+    expect(response.status()).toBe(400);
+    expect((await response.json()).error).toBe(
+      "Effort must be a whole number from 1 (low) to 5 (high).",
+    );
+  }
+  const digit = await create(page, {
+    title: "Digit effort",
+    sectionId: "next-five",
+    effort: "5",
+  });
+  expect(digit.effort).toBe(5);
+  await page.goto("/kanban");
+  await expect(
+    page
+      .getByRole("region", { name: "Kanban board" })
+      .locator(".kanban-card")
+      .filter({ hasText: "Digit effort" })
+      .getByRole("img", { name: "Effort 5 of 5", exact: true }),
+  ).toBeVisible();
+});
+
+test("linking searches items by title or SAV ID and picks with the keyboard or mouse", async ({
+  page,
+}) => {
+  await login(page);
+  const bug = await create(page, {
+    title: "Crash on save",
+    kind: "bug",
+    priority: "P3",
+  });
+  await create(page, { title: "Other bug", kind: "bug", priority: "P4" });
+  await create(page, { title: "Export CSV" });
+  await create(page, { title: "Import CSV" });
+  await create(page, { title: "Audit log" });
+  await page.goto(`/?item=${bug.publicId}`);
+  const picker = dialog(page).getByRole("combobox", {
+    name: "Link to item",
+    exact: true,
+  });
+  const addLink = dialog(page).getByRole("button", {
+    name: "Add link",
+    exact: true,
+  });
+  const options = dialog(page)
+    .getByRole("listbox", { name: "Link to item suggestions", exact: true })
+    .getByRole("option");
+  await expect(addLink).toBeDisabled();
+  await picker.fill("csv");
+  await expect(options).toHaveText([/Export CSV/, /Import CSV/]);
+  await picker.press("ArrowDown");
+  await picker.press("Enter");
+  await expect(picker).toHaveValue("Feature · Import CSV");
+  await expect(options).toHaveCount(0);
+  await expect(addLink).toBeEnabled();
+  await addLink.click();
+  await expect(dialog(page).locator(".link-card")).toContainText("Import CSV");
+  await expect(picker).toHaveValue("");
+  await picker.fill("sav-000002");
+  await expect(options).toHaveText([/SAV-000002.*Other bug/]);
+  await dialog(page).getByRole("option", { name: /Other bug/ }).click();
+  await expect(picker).toHaveValue("SAV-000002 · Other bug");
+  await dialog(page)
+    .getByRole("button", { name: "Clear selected item", exact: true })
+    .click();
+  await expect(picker).toHaveValue("");
+  await expect(addLink).toBeDisabled();
+  await picker.fill("nothing here");
+  await expect(
+    dialog(page).getByText("No matching items", { exact: true }),
+  ).toBeVisible();
+  await expect(options).toHaveCount(0);
+  await picker.fill("audit");
+  await picker.press("Enter");
+  await expect(picker).toHaveValue("Feature · Audit log");
+  await addLink.click();
+  await expect(dialog(page).locator(".link-card")).toHaveCount(2);
+  await expect(dialog(page).locator(".link-card").last()).toContainText(
+    "Audit log",
+  );
+});
+
+test("nested tickets link back to every ancestor from the root down", async ({
+  page,
+}) => {
+  await login(page);
+  const platform = await create(page, { title: "Platform" });
+  const auth = await create(page, { title: "Auth", parentId: platform.id });
+  const sso = await create(page, { title: "SSO", parentId: auth.id });
+  await page.goto(`/?item=${sso.id}`);
+  const parents = dialog(page).getByRole("navigation", {
+    name: "Parent items",
+    exact: true,
+  });
+  await expect(
+    dialog(page).getByRole("heading", { name: "SSO", exact: true }),
+  ).toBeVisible();
+  await expect(parents.getByRole("button")).toHaveText(["Platform", "Auth"]);
+  await parents.getByRole("button", { name: "Auth", exact: true }).click();
+  await expect(
+    dialog(page).getByRole("heading", { name: "Auth", exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`item=${auth.id}`));
+  await expect(parents.getByRole("button")).toHaveText(["Platform"]);
+  await parents.getByRole("button", { name: "Platform", exact: true }).click();
+  await expect(
+    dialog(page).getByRole("heading", { name: "Platform", exact: true }),
+  ).toBeVisible();
+  await expect(parents).toHaveCount(0);
+  await dialog(page).getByRole("button", { name: "Auth", exact: true }).click();
+  await expect(
+    dialog(page).getByRole("heading", { name: "Auth", exact: true }),
+  ).toBeVisible();
+  await expect(parents.getByRole("button")).toHaveText(["Platform"]);
 });

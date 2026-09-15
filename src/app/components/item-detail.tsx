@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { ancestors } from "../../lib/list-view";
 import {
   PRIORITIES,
   STATES,
@@ -15,9 +16,12 @@ import {
   Avatar,
   command,
   dateLabel,
+  EffortBadge,
+  EffortSelect,
   ErrorNotice,
   errorMessage,
   FilePicker,
+  ItemPicker,
   Modal,
   PersonSelect,
   StateControl,
@@ -98,6 +102,7 @@ export function ItemView({
       description: task.description,
       state: task.state,
       priority: task.priority,
+      effort: task.effort,
       implementorId: task.implementorId,
       reviewerId: task.reviewerId,
     });
@@ -111,6 +116,7 @@ export function ItemView({
   const candidates = items.filter(
     (t) => t.id !== task?.id && (task?.kind === "bug" || t.kind === "bug"),
   );
+  const lineage = task ? ancestors(items, task) : [];
   return (
     <Modal
       title={task?.title || "Item details"}
@@ -143,6 +149,7 @@ export function ItemView({
                 {task.priority}
               </span>
             )}
+            <EffortBadge effort={task.effort} detailed />
             <span className="subtle small">
               Logged {dateLabel(task.createdAt)}
             </span>
@@ -159,6 +166,26 @@ export function ItemView({
               )}
             </div>
           </div>
+          {!!lineage.length && (
+            <nav className="detail-parents" aria-label="Parent items">
+              <span className="subtle small">Part of</span>
+              {lineage.map((ancestor, index) => (
+                <Fragment key={ancestor.id}>
+                  {index > 0 && (
+                    <span className="separator" aria-hidden="true">
+                      ›
+                    </span>
+                  )}
+                  <button
+                    className="parent-link"
+                    onClick={() => open(ancestor.id)}
+                  >
+                    {ancestor.title}
+                  </button>
+                </Fragment>
+              ))}
+            </nav>
+          )}
           <div className="detail-layout">
             <div className="detail-main">
               {editing ? (
@@ -200,7 +227,7 @@ export function ItemView({
                       setFiles={setFiles}
                       disabled={busy}
                     />
-                    <div className="field-grid">
+                    <div className="field-grid field-grid-three">
                       <label className="field">
                         State
                         <select
@@ -235,6 +262,10 @@ export function ItemView({
                           ))}
                         </select>
                       </label>
+                      <EffortSelect
+                        value={draft.effort ?? null}
+                        onChange={(effort) => setDraft({ ...draft, effort })}
+                      />
                     </div>
                     <div className="field-grid">
                       <PersonSelect
@@ -491,21 +522,13 @@ export function ItemView({
                           )}
                         </select>
                       </label>
-                      <label className="field">
-                        Link to item
-                        <select
-                          required
-                          value={target}
-                          onChange={(e) => setTarget(e.target.value)}
-                        >
-                          <option value="">Choose a bug or feature</option>
-                          {candidates.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.publicId || "Feature"} · {t.title}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <ItemPicker
+                        label="Link to item"
+                        items={candidates}
+                        value={target}
+                        onChange={setTarget}
+                        disabled={busy}
+                      />
                       <button type="submit" disabled={!target}>
                         Add link
                       </button>

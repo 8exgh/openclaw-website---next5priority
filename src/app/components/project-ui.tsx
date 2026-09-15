@@ -1,11 +1,14 @@
 "use client";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
+  EFFORTS,
+  effortLabel,
   initials,
   STATES,
   STATE_LABELS,
   userName,
   type Attachment,
+  type Effort,
   type Task,
   type TaskState,
   type User,
@@ -285,5 +288,192 @@ export function PersonSelect({
         ))}
       </select>
     </label>
+  );
+}
+export function EffortBadge({
+  effort,
+  detailed = false,
+}: {
+  effort: Effort | null;
+  detailed?: boolean;
+}) {
+  if (!effort) return null;
+  return (
+    <span
+      className={`effort${detailed ? " effort-detailed" : ""}`}
+      role="img"
+      aria-label={`Effort ${effort} of 5`}
+      title={`Effort ${effortLabel(effort)}`}
+    >
+      <span className="effort-dots" aria-hidden="true">
+        {EFFORTS.map((step) => (
+          <i key={step} className={step <= effort ? "filled" : ""} />
+        ))}
+      </span>
+      <span aria-hidden="true">
+        {detailed ? `Effort ${effortLabel(effort)}` : effort}
+      </span>
+    </span>
+  );
+}
+export function EffortSelect({
+  value,
+  onChange,
+}: {
+  value: Effort | null;
+  onChange: (effort: Effort | null) => void;
+}) {
+  return (
+    <label className="field">
+      Effort
+      <select
+        value={value ?? ""}
+        onChange={(event) =>
+          onChange(
+            event.target.value ? (Number(event.target.value) as Effort) : null,
+          )
+        }
+      >
+        <option value="">Not set</option>
+        {EFFORTS.map((step) => (
+          <option key={step} value={step}>
+            {effortLabel(step)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+/** Searchable single-item chooser: type to filter, pick with mouse or keys. */
+export function ItemPicker({
+  label,
+  items,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  items: Task[];
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const inputId = useId(),
+    listId = useId();
+  const selected = items.find((item) => item.id === value);
+  const needle = query.trim().toLowerCase();
+  const matches = items
+    .filter(
+      (item) =>
+        !needle ||
+        `${item.publicId || ""} ${item.title}`.toLowerCase().includes(needle),
+    )
+    .slice(0, 8);
+  const caption = (item: Task) =>
+    `${item.publicId || "Feature"} · ${item.title}`;
+  const choose = (item: Task) => {
+    onChange(item.id);
+    setQuery("");
+    setOpen(false);
+  };
+  const clear = () => {
+    onChange("");
+    setQuery("");
+    setActive(0);
+    setOpen(true);
+  };
+  const listOpen = open && !selected;
+  return (
+    <div className="field item-picker">
+      <label htmlFor={inputId}>{label}</label>
+      <div className="item-picker-input">
+        <input
+          id={inputId}
+          type="text"
+          role="combobox"
+          autoComplete="off"
+          aria-expanded={listOpen}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            listOpen && matches[active]
+              ? `${listId}-${matches[active].id}`
+              : undefined
+          }
+          placeholder="Type a title or SAV ID…"
+          disabled={disabled}
+          readOnly={!!selected}
+          value={selected ? caption(selected) : query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setActive(0);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={(event) => {
+            if (selected) {
+              if (event.key === "Backspace" || event.key === "Delete") {
+                event.preventDefault();
+                clear();
+              }
+              return;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setOpen(true);
+              setActive((index) => Math.min(index + 1, matches.length - 1));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActive((index) => Math.max(index - 1, 0));
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              if (listOpen && matches[active]) choose(matches[active]);
+            } else if (event.key === "Escape" && listOpen) {
+              event.preventDefault();
+              event.stopPropagation();
+              setOpen(false);
+            }
+          }}
+        />
+        {selected && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Clear selected item"
+            disabled={disabled}
+            onClick={clear}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {listOpen && (
+        <ul id={listId} role="listbox" aria-label={`${label} suggestions`}>
+          {matches.map((item, index) => (
+            <li
+              key={item.id}
+              id={`${listId}-${item.id}`}
+              role="option"
+              aria-selected={index === active}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActive(index)}
+              onClick={() => choose(item)}
+            >
+              {item.publicId && <strong>{item.publicId}</strong>}
+              {item.title}
+            </li>
+          ))}
+          {!matches.length && (
+            <li className="no-matches" role="presentation">
+              No matching items
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
   );
 }

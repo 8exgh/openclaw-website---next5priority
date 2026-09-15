@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { kanbanColumns } from "../../lib/kanban";
+import { ancestors, assignedTo } from "../../lib/list-view";
 import { userName, type Task, type User } from "../../lib/project-types";
-import { Avatar, dateLabel, StateControl } from "./project-ui";
+import { Avatar, dateLabel, EffortBadge, StateControl } from "./project-ui";
 import { useKanbanDrag } from "./use-kanban-drag";
 
 export function Kanban({
@@ -12,6 +13,8 @@ export function Kanban({
   busy,
   search,
   stateFilter,
+  mine,
+  userId,
   open,
   patch,
 }: {
@@ -21,6 +24,8 @@ export function Kanban({
   busy: boolean;
   search: string;
   stateFilter: string;
+  mine: boolean;
+  userId: string;
   open: (id: string) => void;
   patch: (data: object) => Promise<void>;
 }) {
@@ -31,7 +36,17 @@ export function Kanban({
     return () => clearInterval(timer);
   }, []);
   const columns = kanbanColumns(items);
+  // Cards are top-level items; a card also counts as mine when one of its
+  // subtasks is assigned to me, mirroring the list view's context rows.
+  const viaSubtask = (task: Task) =>
+    !assignedTo(task, userId) &&
+    items.some(
+      (item) =>
+        assignedTo(item, userId) &&
+        ancestors(items, item).some((parent) => parent.id === task.id),
+    );
   const matches = (task: Task) =>
+    (!mine || assignedTo(task, userId) || viaSubtask(task)) &&
     (!stateFilter || task.state === stateFilter) &&
     (!search ||
       `${task.publicId || ""} ${task.title} ${task.description}`
@@ -98,6 +113,7 @@ export function Kanban({
                           >
                             {task.priority}
                           </span>
+                          <EffortBadge effort={task.effort} />
                           {task.kind === "feature" ? (
                             <span className="feature-badge">
                               {task.sectionId === "next-five"
@@ -132,6 +148,7 @@ export function Kanban({
                           <p className="kanban-computed">
                             {childCount}{" "}
                             {childCount === 1 ? "subtask" : "subtasks"}
+                            {mine && viaSubtask(task) && " · Matching subtask"}
                           </p>
                         )}
                         <div className="kanban-people">
@@ -166,7 +183,9 @@ export function Kanban({
                   })}
                   {!cards.length && (
                     <p className="kanban-empty">
-                      {search || stateFilter ? "No matching items" : "No items"}
+                      {search || stateFilter || mine
+                        ? "No matching items"
+                        : "No items"}
                     </p>
                   )}
                 </div>
