@@ -18,6 +18,7 @@ import {
   errorMessage,
   FilePicker,
   Modal,
+  pasteImages,
   PersonSelect,
 } from "./project-ui";
 export function NewItem({
@@ -118,6 +119,14 @@ export function NewItem({
               maxLength={100000}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              onPaste={(e) =>
+                pasteImages(e, {
+                  files,
+                  setFiles,
+                  setValue: setDescription,
+                  setError,
+                })
+              }
               placeholder={
                 kind === "bug"
                   ? "Steps to reproduce, expected behavior, and what happened…"

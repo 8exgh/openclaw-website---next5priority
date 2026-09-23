@@ -473,6 +473,113 @@ test("bugs support multiline details, assignments, comments, inline images, down
   connection.close();
 });
 
+// Simulates Ctrl+V of a screenshot: a paste event carrying an image file.
+async function pasteImage(page: Page, textbox: string) {
+  await dialog(page)
+    .getByRole("textbox", { name: textbox, exact: true })
+    .evaluate((element: HTMLTextAreaElement, bytes: number[]) => {
+      const data = new DataTransfer();
+      data.items.add(
+        new File([new Uint8Array(bytes)], "image.png", { type: "image/png" }),
+      );
+      element.focus();
+      element.setSelectionRange(element.value.length, element.value.length);
+      element.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, Array.from(png));
+}
+test("images pasted into descriptions and comments show inline and as attachments", async ({
+  page,
+}) => {
+  await login(page);
+  await showBacklog(page, "bug", ["P1", "P2"]);
+  await page.getByRole("button", { name: "Report a bug" }).click();
+  await dialog(page)
+    .getByRole("textbox", { name: "Title", exact: true })
+    .fill("Chart renders blank");
+  await dialog(page)
+    .getByRole("textbox", { name: "Description", exact: true })
+    .fill("Open the dashboard:");
+  await pasteImage(page, "Description");
+  await expect(
+    dialog(page).getByRole("textbox", { name: "Description", exact: true }),
+  ).toHaveValue(
+    "Open the dashboard:\n![pasted-image-1.png](attachment:pasted-image-1.png)",
+  );
+  await expect(
+    dialog(page).locator(".staged-files").getByText("pasted-image-1.png"),
+  ).toBeVisible();
+  await dialog(page)
+    .getByRole("textbox", { name: "Description", exact: true })
+    .press("End");
+  await dialog(page)
+    .getByRole("textbox", { name: "Description", exact: true })
+    .type("\nThe chart area stays empty.");
+  await dialog(page)
+    .getByRole("combobox", { name: "Priority", exact: true })
+    .selectOption("P1");
+  await dialog(page).getByRole("button", { name: "Create bug" }).click();
+  await expect(dialog(page).getByText(/SAV-000001/)).toBeVisible();
+  const inline = dialog(page)
+    .locator(".detail-main .description img.inline-image")
+    .first();
+  await expect(inline).toBeVisible();
+  await expect
+    .poll(() =>
+      inline.evaluate(
+        (img: HTMLImageElement) => img.complete && img.naturalWidth > 0,
+      ),
+    )
+    .toBeTruthy();
+  await expect(
+    dialog(page).locator(".detail-main > section").first(),
+  ).toContainText("Open the dashboard:");
+  await expect(
+    dialog(page).locator(".detail-main > section").first(),
+  ).toContainText("The chart area stays empty.");
+  await expect(
+    dialog(page).locator(".detail-main > section").first(),
+  ).not.toContainText("attachment:");
+  await expect(
+    dialog(page).locator(".attachment").getByRole("link", {
+      name: "↓ pasted-image-1.png",
+    }),
+  ).toBeVisible();
+
+  await pasteImage(page, "Add a comment");
+  await expect(
+    dialog(page).getByRole("textbox", { name: "Add a comment", exact: true }),
+  ).toHaveValue("![pasted-image-1.png](attachment:pasted-image-1.png)");
+  await dialog(page).getByRole("button", { name: "Post comment" }).click();
+  await expect(
+    dialog(page).locator(".comment .description img.inline-image"),
+  ).toBeVisible();
+  await expect(
+    dialog(page).locator(".comment .attachment").getByRole("link", {
+      name: "↓ pasted-image-1.png",
+    }),
+  ).toBeVisible();
+  await expect(dialog(page).locator(".comment")).not.toContainText(
+    "attachment:",
+  );
+
+  // The Kanban preview shows the words without the marker.
+  await close(page);
+  await page
+    .getByRole("navigation", { name: "View", exact: true })
+    .getByRole("button", { name: "Kanban", exact: true })
+    .click();
+  const card = page.locator(".kanban-description", {
+    hasText: "Open the dashboard:",
+  });
+  await expect(card).toBeVisible();
+  await expect(card).not.toContainText("attachment:");
+});
 test("email processor retries SMTP failure and sends assignment, comment and follow notifications once", async ({
   page,
 }) => {

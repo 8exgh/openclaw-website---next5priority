@@ -806,6 +806,31 @@ fieldset {
   font-size: 13px;
   margin: 12px 0;
 }
+.description .inline-image {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f7f8f1;
+}
+.staged-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.staged-preview {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
 .attachments {
   display: grid;
   gap: 12px;

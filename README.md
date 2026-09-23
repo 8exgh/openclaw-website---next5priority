@@ -55,7 +55,11 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   back to the backlog. Older completed items remain accessible in the lists.
 - **Details:** titles, multiline descriptions, effort, implementor/reviewer
   assignments, comments and attachments. Descriptions display as text in view
-  mode and as textareas when editing. Items have shareable `/?item=<id>` links;
+  mode and as textareas when editing. Pasting an image into a description or
+  comment stages it as an attachment named `pasted-image-N.png` and inserts an
+  `![name](attachment:name)` marker at the caret; once saved, the marker
+  renders the image inline and the file also appears under attachments.
+  Kanban card previews omit these markers. Items have shareable `/?item=<id>` links;
   bugs also accept their SAV identifier. Subtasks show a "Part of" trail with
   every ancestor from the root feature down; each name opens that item.
 - **Relationships:** connect a bug to a feature or another bug with Related to

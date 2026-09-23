@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { kanbanColumns } from "../../lib/kanban";
 import { ancestors, assignedTo } from "../../lib/list-view";
 import { userName, type Task, type User } from "../../lib/project-types";
+import { plainText } from "../../lib/rich-text";
 import { Avatar, dateLabel, EffortBadge, StateControl } from "./project-ui";
 import { useKanbanDrag } from "./use-kanban-drag";
 
@@ -139,9 +140,9 @@ export function Kanban({
                         >
                           {task.title}
                         </button>
-                        {task.description && (
+                        {plainText(task.description) && (
                           <p className="kanban-description">
-                            {task.description}
+                            {plainText(task.description)}
                           </p>
                         )}
                         {!task.leaf && (

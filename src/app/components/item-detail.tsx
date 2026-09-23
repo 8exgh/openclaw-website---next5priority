@@ -23,7 +23,9 @@ import {
   FilePicker,
   ItemPicker,
   Modal,
+  pasteImages,
   PersonSelect,
+  RichText,
   StateControl,
 } from "./project-ui";
 
@@ -219,6 +221,16 @@ export function ItemView({
                         onChange={(e) =>
                           setDraft({ ...draft, description: e.target.value })
                         }
+                        onPaste={(e) =>
+                          pasteImages(e, {
+                            files,
+                            setFiles,
+                            setValue: (description) =>
+                              setDraft({ ...draft, description }),
+                            setError,
+                            taken: detail.attachments.map((a) => a.name),
+                          })
+                        }
                       />
                     </label>
                     <Attachments attachments={detail.attachments} />
@@ -311,11 +323,14 @@ export function ItemView({
                       </button>
                     )}
                   </div>
-                  <p
-                    className={`description${!task.description ? " subtle" : ""}`}
-                  >
-                    {task.description || "No description yet."}
-                  </p>
+                  {task.description ? (
+                    <RichText
+                      text={task.description}
+                      attachments={detail.attachments}
+                    />
+                  ) : (
+                    <p className="description subtle">No description yet.</p>
+                  )}
                   <Attachments attachments={detail.attachments} />
                 </section>
               )}
@@ -369,7 +384,10 @@ export function ItemView({
                           </time>
                         </div>
                         {entry.body && (
-                          <p className="description">{entry.body}</p>
+                          <RichText
+                            text={entry.body}
+                            attachments={entry.attachments}
+                          />
                         )}
                         <Attachments attachments={entry.attachments} />
                       </div>
@@ -401,6 +419,14 @@ export function ItemView({
                           maxLength={20000}
                           value={comment}
                           onChange={(e) => setComment(e.target.value)}
+                          onPaste={(e) =>
+                            pasteImages(e, {
+                              files: commentFiles,
+                              setFiles: setCommentFiles,
+                              setValue: setComment,
+                              setError,
+                            })
+                          }
                           placeholder="Write an update…"
                         />
                       </label>

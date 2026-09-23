@@ -13,6 +13,7 @@ import {
   type TaskState,
   type User,
 } from "../../lib/project-types";
+import { imageMarker, nextPastedName, richSegments } from "../../lib/rich-text";
 
 export async function api(url: string, init?: RequestInit) {
   const response = await fetch(url, {
@@ -163,6 +164,61 @@ export function ErrorNotice({ error }: { error: string }) {
     </p>
   ) : null;
 }
+export function stageError(files: File[], avatar = false) {
+  return files.length > (avatar ? 1 : 10) ||
+    files.reduce((sum, file) => sum + file.size, 0) >
+      (avatar ? 5 : 25) * 1024 * 1024
+    ? avatar
+      ? "Choose one picture under 5 MB."
+      : "Choose up to 10 files, totaling at most 25 MB."
+    : "";
+}
+// Paste handler for description and comment textareas: images on the
+// clipboard become staged attachments and an inline marker at the caret.
+export function pasteImages(
+  event: React.ClipboardEvent<HTMLTextAreaElement>,
+  options: {
+    files: File[];
+    setFiles: (files: File[]) => void;
+    setValue: (value: string) => void;
+    setError: (error: string) => void;
+    taken?: string[];
+  },
+) {
+  const images = Array.from(event.clipboardData?.items || [])
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => !!file);
+  if (!images.length) return;
+  event.preventDefault();
+  const taken = new Set([
+    ...(options.taken || []),
+    ...options.files.map((file) => file.name),
+  ]);
+  const staged = images.map((image) => {
+    const name = nextPastedName(taken, image.type);
+    taken.add(name);
+    return new File([image], name, { type: image.type });
+  });
+  const next = [...options.files, ...staged];
+  const error = stageError(next);
+  if (error) {
+    options.setError(error);
+    return;
+  }
+  const target = event.currentTarget;
+  const before = target.value.slice(0, target.selectionStart),
+    after = target.value.slice(target.selectionEnd);
+  const inserted =
+    (before && !before.endsWith("\n") ? "\n" : "") +
+    staged.map((file) => imageMarker(file.name)).join("\n") +
+    (after && !after.startsWith("\n") ? "\n" : "");
+  options.setValue(before + inserted + after);
+  options.setFiles(next);
+  options.setError("");
+  const caret = before.length + inserted.length;
+  requestAnimationFrame(() => target.setSelectionRange(caret, caret));
+}
 export function FilePicker({
   files,
   setFiles,
@@ -191,33 +247,25 @@ export function FilePicker({
             const selected = Array.from(event.target.files || []);
             const next = avatar ? selected : [...files, ...selected];
             event.target.value = "";
-            if (
-              next.length > (avatar ? 1 : 10) ||
-              next.reduce((sum, file) => sum + file.size, 0) >
-                (avatar ? 5 : 25) * 1024 * 1024
-            ) {
-              setError(
-                avatar
-                  ? "Choose one picture under 5 MB."
-                  : "Choose up to 10 files, totaling at most 25 MB.",
-              );
-              return;
-            }
-            setError("");
-            setFiles(next);
+            const problem = stageError(next, avatar);
+            setError(problem);
+            if (!problem) setFiles(next);
           }}
         />
       </label>
       <span className="subtle small">
         {avatar
           ? "PNG, JPEG, GIF or WebP · up to 5 MB"
-          : "Any file type · up to 25 MB total"}
+          : "Any file type · up to 25 MB total · paste images into the text to show them inline"}
       </span>
       {!!files.length && (
         <ul className="staged-files">
           {files.map((file, i) => (
             <li key={`${file.name}-${i}`}>
-              <span>
+              <span className="staged-file">
+                {file.type.startsWith("image/") && (
+                  <StagedPreview file={file} />
+                )}
                 {file.name}{" "}
                 <small>({Math.max(1, Math.round(file.size / 1024))} KB)</small>
               </span>
@@ -238,6 +286,54 @@ export function FilePicker({
       )}
       <ErrorNotice error={error} />
     </div>
+  );
+}
+function StagedPreview({ file }: { file: File }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+  return url ? <img className="staged-preview" src={url} alt="" /> : null;
+}
+// A description or comment body with image markers resolved against the
+// attachments saved alongside it. Unmatched markers stay as text.
+export function RichText({
+  text,
+  attachments,
+  className = "description",
+}: {
+  text: string;
+  attachments: Attachment[];
+  className?: string;
+}) {
+  return (
+    <p className={className}>
+      {richSegments(text).map((segment, i) => {
+        if (segment.type === "text") return segment.text;
+        const file = attachments.find(
+          (a) => a.name === segment.name && a.mime.startsWith("image/"),
+        );
+        return file ? (
+          <a
+            key={i}
+            href={`/api/assets/${file.id}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <img
+              className="inline-image"
+              src={`/api/assets/${file.id}`}
+              alt={segment.alt}
+              loading="lazy"
+            />
+          </a>
+        ) : (
+          segment.marker
+        );
+      })}
+    </p>
   );
 }
 export function Attachments({ attachments }: { attachments: Attachment[] }) {
