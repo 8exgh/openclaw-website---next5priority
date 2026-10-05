@@ -110,6 +110,22 @@ export function BacklogFilters({
             ))}
           </select>
         </label>
+        <label className="filter-field filter-sort">
+          Sort by
+          <select
+            aria-label="Sort by"
+            value={filters.sort}
+            onChange={(event) =>
+              change({
+                ...filters,
+                sort: event.target.value as ListFilters["sort"],
+              })
+            }
+          >
+            <option value="priority">Severity first</option>
+            <option value="newest">Most recently added</option>
+          </select>
+        </label>
         <MineFilter
           filters={filters}
           change={change}

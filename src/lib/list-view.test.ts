@@ -103,6 +103,78 @@ test("class, severity, state, and text filters combine while severity selections
   assert.equal(filterList(items, defaultFilters()).length, 4);
 });
 
+test("most recently added orders by creation time across priorities without mutating items or flattening subtasks", () => {
+  const older = task("older", {
+    priority: "P1",
+    updatedAt: "2026-10-01T00:00:00Z",
+    leaf: false,
+    children: [
+      task("older-child", { parentId: "older" }),
+      task("newer-child", {
+        parentId: "older",
+        createdAt: "2026-09-30T00:00:00Z",
+      }),
+    ],
+  });
+  const newer = task("newer", {
+    kind: "bug",
+    priority: "P4",
+    createdAt: "2026-09-20T00:00:00Z",
+  });
+  const tied = task("tied", { createdAt: newer.createdAt });
+  const items = backlogItems([tied, newer, older]);
+  const original = structuredClone(items);
+  const filters = { ...defaultFilters(), sort: "newest" as const };
+  const visible = filterList(items, filters);
+  assert.deepEqual(visible.map((item) => item.id), ["newer", "tied", "older"]);
+  assert.deepEqual(visible[2].children.map((item) => item.id), [
+    "newer-child",
+    "older-child",
+  ]);
+  assert.deepEqual(items, original);
+  assert.deepEqual(
+    filterList(items, defaultFilters()).map((item) => item.id),
+    ["older", "tied", "newer"],
+  );
+  assert.deepEqual(
+    filterList(items, { ...filters, ticketClass: "feature" }).map(
+      (item) => item.id,
+    ),
+    ["tied", "older"],
+  );
+});
+
+test("Backlog sort bookmarks round trip with filters and item links, and invalid sorts fall back to severity", () => {
+  const filters = {
+    ...defaultFilters(),
+    sort: "newest" as const,
+    ticketClass: "bug" as const,
+    search: "login",
+    mine: true,
+  };
+  const url = listUrl(
+    new URL("https://app.test/?item=SAV-000042"),
+    "backlog",
+    filters,
+  );
+  assert.equal(url.searchParams.get("sort"), "newest");
+  assert.equal(url.searchParams.get("item"), "SAV-000042");
+  assert.deepEqual(readListLocation(url), { tab: "backlog", filters });
+  const reset = listUrl(url, "backlog", defaultFilters());
+  assert.equal(reset.searchParams.has("sort"), false);
+  assert.equal(readListLocation(reset).filters.sort, "priority");
+  assert.equal(
+    readListLocation(new URL("https://app.test/backlog?sort=unknown")).filters.sort,
+    "priority",
+  );
+  for (const tab of ["next-five", "kanban"] as const) {
+    assert.equal(listUrl(url, tab, filters).searchParams.has("sort"), false);
+    const otherView = listUrl(url, tab, filters);
+    otherView.searchParams.set("sort", "newest");
+    assert.equal(readListLocation(otherView).filters.sort, "priority");
+  }
+});
+
 test("matching subtasks retain their ancestors as context without leaking unrelated children", () => {
   const children = [
     task("match", { parentId: "parent", priority: "P1" }),

@@ -1412,6 +1412,9 @@ fieldset {
 .filter-search {
   flex: 1.5;
 }
+.filter-sort {
+  min-width: 190px;
+}
 .severity-filter {
   border: 0;
   margin: 0;
@@ -1616,7 +1619,8 @@ fieldset {
     grid-column: 1 / -1;
     grid-row: 2;
   }
-  .filter-search {
+  .filter-search,
+  .filter-sort {
     grid-column: 1 / -1;
   }
   .filter-state {

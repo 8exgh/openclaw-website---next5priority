@@ -14,6 +14,7 @@ export type ListFilters = {
   search: string;
   state: TaskState | "";
   mine: boolean;
+  sort: "priority" | "newest";
 };
 export type ListTask = Task & { filterContext?: boolean; children: ListTask[] };
 export const defaultFilters = (): ListFilters => ({
@@ -22,6 +23,7 @@ export const defaultFilters = (): ListFilters => ({
   search: "",
   state: "",
   mine: false,
+  sort: "priority",
 });
 const paths: Record<BoardTab, string> = {
   "next-five": "/",
@@ -50,6 +52,7 @@ export function readListLocation(url: URL): {
     filters.severities = legacyHigh ? ["P1", "P2"] : ["P3", "P4"];
   }
   if (tab === "backlog") {
+    if (params.get("sort") === "newest") filters.sort = "newest";
     if (params.get("class") === "features") filters.ticketClass = "feature";
     if (params.get("class") === "bugs") filters.ticketClass = "bug";
     if (params.get("class") === "all") filters.ticketClass = "all";
@@ -70,9 +73,10 @@ export function readListLocation(url: URL): {
 export function listUrl(current: URL, tab: BoardTab, filters: ListFilters) {
   const url = new URL(current);
   url.pathname = paths[tab];
-  for (const key of ["view", "class", "severity", "q", "state", "mine"])
+  for (const key of ["view", "class", "severity", "q", "state", "mine", "sort"])
     url.searchParams.delete(key);
   if (tab === "backlog") {
+    if (filters.sort === "newest") url.searchParams.set("sort", "newest");
     if (filters.ticketClass !== "all")
       url.searchParams.set(
         "class",
@@ -140,7 +144,7 @@ export function filterList(
   userId: string | null = null,
 ): ListTask[] {
   const query = filters.search.trim().toLowerCase();
-  return items.flatMap((item) => {
+  const visible = items.flatMap((item) => {
     const children = filterList(item.children, filters, userId);
     const matches =
       (filters.ticketClass === "all" || item.kind === filters.ticketClass) &&
@@ -161,4 +165,11 @@ export function filterList(
       },
     ];
   });
+  if (filters.sort === "newest")
+    visible.sort(
+      (a, b) =>
+        Date.parse(b.createdAt) - Date.parse(a.createdAt) ||
+        a.id.localeCompare(b.id),
+    );
+  return visible;
 }

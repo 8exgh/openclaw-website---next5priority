@@ -1633,6 +1633,64 @@ test("List separates Next 5 from the combined backlog and persists class, severi
   ).toHaveText([next.title, "Feature P1"]);
 });
 
+test("Backlog can sort by most recently added, preserving filters and bookmarks", async ({
+  page,
+}) => {
+  await login(page, E2E.ownerEmail, "/backlog");
+  const older = await create(page, {
+    title: "Older urgent feature",
+    priority: "P1",
+  });
+  const middle = await create(page, { title: "Middle feature", priority: "P3" });
+  const newest = await create(page, {
+    title: "Newest bug",
+    kind: "bug",
+    priority: "P4",
+  });
+  const connection = db();
+  try {
+    const setDate = connection.prepare(
+      "UPDATE tasks SET created_at=? WHERE id=?",
+    );
+    setDate.run("2026-09-01T00:00:00Z", older.id);
+    setDate.run("2026-09-02T00:00:00Z", middle.id);
+    setDate.run("2026-09-03T00:00:00Z", newest.id);
+  } finally {
+    connection.close();
+  }
+  await page.reload();
+  const backlog = page.getByRole("region", { name: "Backlog", exact: true });
+  const titles = backlog.locator(".task-title > span:last-child");
+  const sort = page.getByRole("combobox", { name: "Sort by", exact: true });
+  await expect(sort).toHaveValue("priority");
+  await expect(titles).toHaveText([older.title, middle.title, newest.title]);
+  await sort.selectOption({ label: "Most recently added" });
+  await expect(titles).toHaveText([newest.title, middle.title, older.title]);
+  await expect(page).toHaveURL(/sort=newest/);
+  await expect(backlog).toContainText("most recently added first");
+  await page.reload();
+  await expect(sort).toHaveValue("newest");
+  await expect(titles).toHaveText([newest.title, middle.title, older.title]);
+  await backlog.getByRole("button", { name: older.title, exact: true }).click();
+  await expect(page).toHaveURL(/sort=newest/);
+  await close(page);
+  await page.getByLabel("Ticket class", { exact: true }).selectOption("feature");
+  await expect(titles).toHaveText([middle.title, older.title]);
+  await page.reload();
+  await expect(sort).toHaveValue("newest");
+  await expect(titles).toHaveText([middle.title, older.title]);
+  await sort.selectOption("priority");
+  await expect(titles).toHaveText([older.title, middle.title]);
+  expect(new URL(page.url()).searchParams.has("sort")).toBe(false);
+  await sort.selectOption("newest");
+  await page
+    .getByRole("button", { name: "Reset filters", exact: true })
+    .click();
+  await expect(sort).toHaveValue("priority");
+  await expect(titles).toHaveText([older.title, middle.title, newest.title]);
+  expect(new URL(page.url()).searchParams.has("sort")).toBe(false);
+});
+
 test("Backlog filters stay visible and usable while scrolling on desktop and mobile", async ({
   page,
 }) => {
@@ -1656,6 +1714,9 @@ test("Backlog filters stay visible and usable while scrolling on desktop and mob
   ]) {
     await page.setViewportSize(viewport);
     await selectSeverities(page, ["P1", "P2"]);
+    await page
+      .getByRole("combobox", { name: "Sort by", exact: true })
+      .selectOption("newest");
     if (viewport.width === 1440)
       await page.screenshot({ path: ".playwright/backlog-overview.png" });
     await page.evaluate(() => window.scrollTo(0, 1400));

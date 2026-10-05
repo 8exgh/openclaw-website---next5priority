@@ -7,7 +7,10 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
 
 - **Views:** List and Kanban. List has Next 5 (`/`) and Backlog (`/backlog`)
   sub-tabs. Next 5 preserves the five-feature order. Backlog combines all bugs
-  with features outside Next 5, sorted by severity and newest report.
+  with features outside Next 5, sorted by severity and newest report by default.
+  Its Sort by control also offers Most recently added, ordering items and sibling
+  subtasks by creation date, newest first. Sorting is saved in the URL as
+  `sort=newest`; Reset filters restores the default severity order.
 - **Backlog filters:** single-select ticket class (All, Features, Bugs), multiple
   severity selections (P1–P4), search, state, and My tickets. All severities start
   selected; clearing them shows no results. Filters combine, stay visible in a

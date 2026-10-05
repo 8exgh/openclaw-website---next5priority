@@ -552,7 +552,9 @@ export function ProjectApp({
                 <p>
                   {tab === "next-five"
                     ? "Ordered by focus · move features up or down"
-                    : "Features and bugs · severity first, then newest report"}
+                    : filters.sort === "newest"
+                      ? "Features and bugs · most recently added first"
+                      : "Features and bugs · severity first, then newest report"}
                 </p>
               </div>
               <span className="section-count">
