@@ -5,12 +5,27 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
 
 ## Workflows
 
-- **Views:** List and Kanban. List has Next 5 (`/`) and Backlog (`/backlog`)
+- **Views:** List, Kanban, and Sprint. List has Next 5 (`/`) and Backlog (`/backlog`)
   sub-tabs. Next 5 preserves the five-feature order. Backlog combines all bugs
   with features outside Next 5, sorted by severity and newest report by default.
   Its Sort by control also offers Most recently added, ordering items and sibling
   subtasks by creation date, newest first. Sorting is saved in the URL as
   `sort=newest`; Reset filters restores the default severity order.
+- **Sprint:** `/sprint` opens the current Monday–Sunday week in the site's
+  configured time zone (America/Edmonton). Sprint IDs are generated as
+  `YYYY-MM-dd-to-MM-dd`, for example `2026-10-05-to-10-11`; a year-crossing week
+  is `2026-12-28-to-01-03`. The week selector offers the current week, including
+  when empty, plus every other week with at least one assigned root item.
+  Selecting another week is saved as `?sprint=<id>` and survives refresh and
+  browser back/forward. If its last item leaves, the view returns to this week.
+  Sprint shows only the root features and bugs assigned to that week, including
+  completed items and Next 5 features. Open a root's details to see its subtasks.
+  Editors assign, move, or remove a root using its searchable Sprint picker in
+  the list, creation form, or item details. Suggestions include nearby weeks;
+  typing any date (`YYYY-MM-DD`) or full sprint ID finds other weeks automatically.
+  Choose No sprint to unassign. New items created from Sprint default to the
+  selected week. Assignment is independent of list placement and survives
+  feature/bug conversion. Subtasks cannot be assigned independently.
 - **Backlog filters:** single-select ticket class (All, Features, Bugs), multiple
   severity selections (P1–P4), search, state, and My tickets. All severities start
   selected; clearing them shows no results. Filters combine, stay visible in a
@@ -113,6 +128,9 @@ unavailable.
 Existing features without a priority receive P3 once, with snapshots recorded
 in the event log. Their ordering, edit dates, and completion dates are preserved.
 
+Existing items gain a nullable `sprint_id` column automatically and start with
+no sprint. Sprint assignments are included in item snapshots in the event log.
+
 Existing parents' displayed states and completion dates are preserved once when
 migrating from computed child rollups to independently editable states. The
 migration records each parent snapshot without changing children or edit dates.
@@ -208,11 +226,12 @@ and its compatibility alias `/api/v1/tasks`.
   `description`, `state`, `implementorId`, `reviewerId`, feature `sectionId`
   (`feature-backlog`/`next-five`), optional feature `parentId`, `priority`
   (`P1`/`P2`/`P3`/`P4`) for either kind, and optional `effort` (a whole number
-  from 1 to 5, or `null` to leave it unset).
+  from 1 to 5, or `null` to leave it unset). Root items also accept `sprintId`
+  (`YYYY-MM-dd-to-MM-dd`, a Monday–Sunday range), or `null` for no sprint.
   Defaults: feature, backlog, Needs review, P3, and no effort.
 - `PATCH`: supply `id` and changed fields. Set a root feature's `sectionId` to
   move it; set its zero-based `position` to reorder within Next 5. Set assignment
-  fields or `effort` to `null` to clear them. A bug's section is always derived
+  fields, `effort`, or `sprintId` to `null` to clear them. A bug's section is always derived
   from its priority.
 - `POST { action: "comment", id, body }`: add a comment and/or attachments.
 - `POST { action: "convert", id, kind: "bug"|"feature" }`: convert an existing

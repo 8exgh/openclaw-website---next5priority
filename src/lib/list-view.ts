@@ -6,8 +6,9 @@ import {
   type Task,
   type TaskState,
 } from "./project-types.ts";
+import { isSprintId } from "./sprints.ts";
 
-export type BoardTab = "next-five" | "backlog" | "kanban";
+export type BoardTab = "next-five" | "backlog" | "kanban" | "sprint";
 export type ListFilters = {
   ticketClass: "all" | ItemKind;
   severities: Priority[];
@@ -15,6 +16,7 @@ export type ListFilters = {
   state: TaskState | "";
   mine: boolean;
   sort: "priority" | "newest";
+  sprint: string;
 };
 export type ListTask = Task & { filterContext?: boolean; children: ListTask[] };
 export const defaultFilters = (): ListFilters => ({
@@ -24,11 +26,13 @@ export const defaultFilters = (): ListFilters => ({
   state: "",
   mine: false,
   sort: "priority",
+  sprint: "",
 });
 const paths: Record<BoardTab, string> = {
   "next-five": "/",
   backlog: "/backlog",
   kanban: "/kanban",
+  sprint: "/sprint",
 };
 
 export function readListLocation(url: URL): {
@@ -42,11 +46,13 @@ export function readListLocation(url: URL): {
     (url.pathname === "/" && params.get("view") === "bugs");
   const legacyLow = url.pathname === "/bugs/p3-p4";
   const tab =
-    url.pathname === "/kanban"
-      ? "kanban"
-      : url.pathname === "/backlog" || legacyHigh || legacyLow
-        ? "backlog"
-        : "next-five";
+    url.pathname === "/sprint"
+      ? "sprint"
+      : url.pathname === "/kanban"
+        ? "kanban"
+        : url.pathname === "/backlog" || legacyHigh || legacyLow
+          ? "backlog"
+          : "next-five";
   if (legacyHigh || legacyLow) {
     filters.ticketClass = "bug";
     filters.severities = legacyHigh ? ["P1", "P2"] : ["P3", "P4"];
@@ -63,17 +69,23 @@ export function readListLocation(url: URL): {
       );
     }
   }
-  filters.search = params.get("q") || "";
-  const state = params.get("state");
-  filters.state = STATES.find((value) => value === state) || "";
-  filters.mine = params.get("mine") === "1";
+  if (tab !== "sprint") {
+    filters.search = params.get("q") || "";
+    const state = params.get("state");
+    filters.state = STATES.find((value) => value === state) || "";
+    filters.mine = params.get("mine") === "1";
+  }
+  const sprint = params.get("sprint");
+  if (tab === "sprint" && isSprintId(sprint)) filters.sprint = sprint;
   return { tab, filters };
 }
 
 export function listUrl(current: URL, tab: BoardTab, filters: ListFilters) {
   const url = new URL(current);
   url.pathname = paths[tab];
-  for (const key of ["view", "class", "severity", "q", "state", "mine", "sort"])
+  for (const key of [
+    "view", "class", "severity", "q", "state", "mine", "sort", "sprint",
+  ])
     url.searchParams.delete(key);
   if (tab === "backlog") {
     if (filters.sort === "newest") url.searchParams.set("sort", "newest");
@@ -90,9 +102,13 @@ export function listUrl(current: URL, tab: BoardTab, filters: ListFilters) {
         ).join(",") || "none",
       );
   }
-  if (filters.search) url.searchParams.set("q", filters.search);
-  if (filters.state) url.searchParams.set("state", filters.state);
-  if (filters.mine) url.searchParams.set("mine", "1");
+  if (tab !== "sprint") {
+    if (filters.search) url.searchParams.set("q", filters.search);
+    if (filters.state) url.searchParams.set("state", filters.state);
+    if (filters.mine) url.searchParams.set("mine", "1");
+  }
+  if (tab === "sprint" && isSprintId(filters.sprint))
+    url.searchParams.set("sprint", filters.sprint);
   return url;
 }
 
@@ -117,7 +133,7 @@ export function ancestors(items: Task[], task: Task): Task[] {
   return chain;
 }
 
-export function listForItem(item: Task): BoardTab {
+export function listForItem(item: Task): "next-five" | "backlog" {
   return item.kind === "feature" && item.sectionId === "next-five"
     ? "next-five"
     : "backlog";

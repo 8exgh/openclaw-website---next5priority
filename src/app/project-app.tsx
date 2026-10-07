@@ -18,6 +18,13 @@ import {
 } from "../lib/project-types";
 import { Kanban } from "./components/kanban";
 import { BacklogFilters, MineFilter } from "./components/backlog-filters";
+import { SprintPicker } from "./components/sprint-picker";
+import {
+  availableSprints,
+  currentSprint,
+  sprintAssignmentOptions,
+  sprintItems,
+} from "../lib/sprints";
 import {
   backlogItems,
   defaultFilters,
@@ -47,6 +54,7 @@ type CreateOptions = {
   sectionId?: string;
   parent?: Task;
   initialPriority?: Priority;
+  initialSprint?: string | null;
 };
 function TaskRow({
   task,
@@ -56,6 +64,7 @@ function TaskRow({
   patch,
   count,
   busy,
+  sprintOptions,
   depth = 0,
 }: {
   task: ListTask;
@@ -65,6 +74,7 @@ function TaskRow({
   patch: (data: object) => Promise<void>;
   count: number;
   busy: boolean;
+  sprintOptions: string[];
   depth?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -131,6 +141,20 @@ function TaskRow({
           </span>
         )}
         <EffortBadge effort={task.effort} />
+        {!task.parentId &&
+          (canEdit ? (
+            <div className="row-sprint">
+              <SprintPicker
+                ariaLabel={`Sprint for ${task.title}`}
+                value={task.sprintId}
+                options={sprintOptions}
+                disabled={busy}
+                onChange={(sprintId) => patch({ id: task.id, sprintId })}
+              />
+            </div>
+          ) : task.sprintId ? (
+            <span className="sprint-badge">{task.sprintId}</span>
+          ) : null)}
         {canEdit && task.kind === "feature" && !task.parentId && (
           <div className="row-actions">
             {task.sectionId === "next-five" && (
@@ -188,6 +212,7 @@ function TaskRow({
                 patch={patch}
                 count={count}
                 busy={busy}
+                sprintOptions={sprintOptions}
                 depth={depth + 1}
               />
             ))}
@@ -213,6 +238,12 @@ export function ProjectApp({
     initialTab === "backlog" ? "backlog" : "next-five",
   );
   const [filters, setFilters] = useState<ListFilters>(defaultFilters);
+  const [week, setWeek] = useState(currentSprint);
+  const sprintWeeks = availableSprints(items, week);
+  const activeSprint = sprintWeeks.includes(filters.sprint)
+    ? filters.sprint
+    : week;
+  const sprintOptions = sprintAssignmentOptions(items, week);
   const search = filters.search,
     stateFilter = filters.state;
   const headerRef = useRef<HTMLElement>(null);
@@ -248,7 +279,8 @@ export function ProjectApp({
       setSelected(current.searchParams.get("item"));
       setTab(location.tab);
       setFilters(location.filters);
-      if (location.tab !== "kanban") setLastListTab(location.tab);
+      if (location.tab === "next-five" || location.tab === "backlog")
+        setLastListTab(location.tab);
       const url = listUrl(current, location.tab, location.filters);
       if (url.href !== current.href) window.history.replaceState({}, "", url);
     };
@@ -257,7 +289,22 @@ export function ProjectApp({
     return () => window.removeEventListener("popstate", sync);
   }, [load]);
   useEffect(() => {
-    if (!selected || tab === "kanban") return;
+    const timer = setInterval(() => setWeek(currentSprint()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (
+      loading || !me || tab !== "sprint" || !filters.sprint ||
+      availableSprints(items, week).includes(filters.sprint)
+    ) return;
+    const next = { ...filters, sprint: "" };
+    setFilters(next);
+    window.history.replaceState(
+      {}, "", listUrl(new URL(window.location.href), tab, next),
+    );
+  }, [items, week, filters, tab, loading, me]);
+  useEffect(() => {
+    if (!selected || tab === "kanban" || tab === "sprint") return;
     const item = items.find(
       (item) => item.id === selected || item.publicId === selected,
     );
@@ -266,7 +313,7 @@ export function ProjectApp({
     // Item links still resolve to the current list after a move or conversion.
     if (next !== tab) {
       setTab(next);
-      if (next !== "kanban") setLastListTab(next);
+      setLastListTab(next);
       window.history.replaceState(
         {},
         "",
@@ -295,21 +342,32 @@ export function ProjectApp({
   const selectTab = (next: BoardTab) => {
     if (next === tab) return;
     setTab(next);
-    if (next !== "kanban") setLastListTab(next);
-    const nextFilters = { ...filters, search: "", state: "" as const };
+    if (next === "next-five" || next === "backlog") setLastListTab(next);
+    const nextFilters = {
+      ...filters, search: "", state: "" as const, sprint: "",
+    };
     setFilters(nextFilters);
     const url = listUrl(new URL(window.location.href), next, nextFilters);
     if (url.href !== window.location.href)
       window.history.pushState({}, "", url);
+  };
+  const selectSprint = (sprint: string) => {
+    const next = { ...filters, sprint: sprint === week ? "" : sprint };
+    setFilters(next);
+    setSelected(null);
+    const url = listUrl(new URL(window.location.href), "sprint", next);
+    url.searchParams.delete("item");
+    if (url.href !== window.location.href) window.history.pushState({}, "", url);
   };
   const open = (id: string | null) => {
     setSelected(id);
     const item = id
       ? items.find((item) => item.id === id || item.publicId === id)
       : undefined;
-    const next = item && tab !== "kanban" ? listForItem(item) : tab;
+    const next = item && tab !== "kanban" && tab !== "sprint"
+      ? listForItem(item) : tab;
     setTab(next);
-    if (next !== "kanban") setLastListTab(next);
+    if (next === "next-five" || next === "backlog") setLastListTab(next);
     const url = listUrl(new URL(window.location.href), next, filters);
     if (id) url.searchParams.set("item", id);
     else url.searchParams.delete("item");
@@ -354,18 +412,22 @@ export function ProjectApp({
   const nextFive =
     sections.find((section) => section.id === "next-five")?.tasks || [];
   const backlog = backlogItems(sections.flatMap((section) => section.tasks));
-  const listItems = tab === "next-five" ? nextFive : backlog;
+  const listItems = tab === "sprint"
+    ? sprintItems(items, activeSprint)
+    : tab === "next-five" ? nextFive : backlog;
   const activeFilters =
-    tab === "backlog"
-      ? filters
-      : { ...defaultFilters(), search, state: filters.state, mine: filters.mine };
+    tab === "sprint"
+      ? defaultFilters()
+      : tab === "backlog"
+        ? filters
+        : { ...defaultFilters(), search, state: filters.state, mine: filters.mine };
   const visibleItems = filterList(listItems, activeFilters, me.id);
   const filtered =
-    !!search ||
-    !!stateFilter ||
-    filters.mine ||
-    (tab === "backlog" &&
-      (filters.ticketClass !== "all" || filters.severities.length !== 4));
+    tab !== "sprint" && (
+      !!search || !!stateFilter || filters.mine ||
+      (tab === "backlog" &&
+        (filters.ticketClass !== "all" || filters.severities.length !== 4))
+    );
   return (
     <>
       <header ref={headerRef} className="app-header">
@@ -417,16 +479,20 @@ export function ProjectApp({
             <h1>
               {tab === "kanban"
                 ? "Keep the work moving."
-                : tab === "next-five"
-                  ? "Make the next five count."
-                  : "Make room for what’s next."}
+                : tab === "sprint"
+                  ? "Plan the week ahead."
+                  : tab === "next-five"
+                    ? "Make the next five count."
+                    : "Make room for what’s next."}
             </h1>
             <p>
               {tab === "kanban"
                 ? "Your next five features and urgent bugs, from first review to done."
-                : tab === "next-five"
-                  ? "Choose five features to focus on. Move them up or down as priorities change."
-                  : "Features and bugs in one backlog. Find the right work by class, severity, and state."}
+                : tab === "sprint"
+                  ? "Weekly sprints, Monday through Sunday. Assign root items to plan your work."
+                  : tab === "next-five"
+                    ? "Choose five features to focus on. Move them up or down as priorities change."
+                    : "Features and bugs in one backlog. Find the right work by class, severity, and state."}
             </p>
           </div>
           {canEdit && (
@@ -434,7 +500,11 @@ export function ProjectApp({
               <button
                 className="primary"
                 onClick={() =>
-                  setCreating({ kind: "feature", sectionId: "feature-backlog" })
+                  setCreating({
+                    kind: "feature",
+                    sectionId: "feature-backlog",
+                    initialSprint: tab === "sprint" ? activeSprint : null,
+                  })
                 }
               >
                 ＋ New feature
@@ -443,6 +513,7 @@ export function ProjectApp({
                 onClick={() =>
                   setCreating({
                     kind: "bug",
+                    initialSprint: tab === "sprint" ? activeSprint : null,
                     initialPriority:
                       tab === "backlog" && !filters.severities.includes("P3")
                         ? PRIORITIES.find((priority) =>
@@ -460,7 +531,7 @@ export function ProjectApp({
         <div className="board-toolbar">
           <nav className="board-tabs" aria-label="View">
             <button
-              aria-pressed={tab !== "kanban"}
+              aria-pressed={tab === "next-five" || tab === "backlog"}
               onClick={() => selectTab(lastListTab)}
             >
               List
@@ -471,8 +542,14 @@ export function ProjectApp({
             >
               Kanban
             </button>
+            <button
+              aria-pressed={tab === "sprint"}
+              onClick={() => selectTab("sprint")}
+            >
+              Sprint
+            </button>
           </nav>
-          {tab !== "backlog" && (
+          {(tab === "next-five" || tab === "kanban") && (
             <div className="board-filters">
               <input
                 type="search"
@@ -507,8 +584,32 @@ export function ProjectApp({
               <MineFilter filters={filters} change={changeFilters} />
             </div>
           )}
+          {tab === "sprint" && (
+            <div className="sprint-controls">
+              <label className="filter-field">
+                Sprint
+                <select
+                  aria-label="Selected sprint"
+                  value={activeSprint}
+                  onChange={(event) => selectSprint(event.target.value)}
+                >
+                  {sprintWeeks.map((sprint) => (
+                    <option key={sprint} value={sprint}>
+                      {sprint}{sprint === week ? " · Current week" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                disabled={activeSprint === week}
+                onClick={() => selectSprint(week)}
+              >
+                Current week
+              </button>
+            </div>
+          )}
         </div>
-        {tab !== "kanban" && (
+        {(tab === "next-five" || tab === "backlog") && (
           <nav className="list-tabs" aria-label="List sections">
             <button
               aria-pressed={tab === "next-five"}
@@ -544,25 +645,31 @@ export function ProjectApp({
         ) : (
           <section
             className={`project-section ${tab === "next-five" ? "next-five-section" : "backlog-section"}`}
-            aria-label={tab === "next-five" ? "Next 5 features" : "Backlog"}
+            aria-label={tab === "sprint" ? "Sprint items"
+              : tab === "next-five" ? "Next 5 features" : "Backlog"}
           >
             <div className="section-head">
               <div>
-                <h2>{tab === "next-five" ? "Next 5" : "Backlog"}</h2>
+                <h2>
+                  {tab === "sprint" ? activeSprint
+                    : tab === "next-five" ? "Next 5" : "Backlog"}
+                </h2>
                 <p>
-                  {tab === "next-five"
-                    ? "Ordered by focus · move features up or down"
-                    : filters.sort === "newest"
-                      ? "Features and bugs · most recently added first"
-                      : "Features and bugs · severity first, then newest report"}
+                  {tab === "sprint"
+                    ? "Root items assigned to this sprint"
+                    : tab === "next-five"
+                      ? "Ordered by focus · move features up or down"
+                      : filters.sort === "newest"
+                        ? "Features and bugs · most recently added first"
+                        : "Features and bugs · severity first, then newest report"}
                 </p>
               </div>
               <span className="section-count">
                 {tab === "next-five"
                   ? `${nextFive.length} / 5`
                   : filtered
-                    ? `${visibleItems.length} of ${backlog.length}`
-                    : backlog.length}
+                    ? `${visibleItems.length} of ${listItems.length}`
+                    : listItems.length}
               </span>
             </div>
             <div className="tasks">
@@ -575,8 +682,9 @@ export function ProjectApp({
                     canEdit={canEdit}
                     open={open}
                     patch={patch}
-                    count={listItems.length}
+                    count={nextFive.length}
                     busy={busy}
+                    sprintOptions={sprintOptions}
                   />
                 ))
               ) : (
@@ -585,9 +693,11 @@ export function ProjectApp({
                   <p>
                     {filtered
                       ? "No matching items."
-                      : tab === "next-five"
-                        ? "Your next five start here."
-                        : "Room for your next idea."}
+                      : tab === "sprint"
+                        ? "No items assigned to this sprint."
+                        : tab === "next-five"
+                          ? "Your next five start here."
+                          : "Room for your next idea."}
                   </p>
                   {tab === "next-five" && !filtered && (
                     <span>
@@ -617,9 +727,11 @@ export function ProjectApp({
         <p className="board-footnote">
           {tab === "kanban"
             ? "Completed cards stay visible for 28 days from completion. Earlier work remains available in List."
-            : tab === "next-five"
-              ? "Change an item’s state from its label. Parent and subtask states are independent."
-              : "Next 5 features have their own list. Parents marked “Matching subtask” provide context for filtered results."}
+            : tab === "sprint"
+              ? "Assign or move work using an item’s Sprint picker. Open an item to view its subtasks."
+              : tab === "next-five"
+                ? "Change an item’s state from its label. Parent and subtask states are independent."
+                : "Next 5 features have their own list. Parents marked “Matching subtask” provide context for filtered results."}
         </p>
       </main>
       {selected && !creating && (
@@ -629,6 +741,7 @@ export function ProjectApp({
           me={me}
           users={users}
           items={items}
+          sprintOptions={sprintOptions}
           close={() => open(null)}
           changed={load}
           open={open}
@@ -639,6 +752,7 @@ export function ProjectApp({
         <NewItem
           {...creating}
           users={users}
+          sprintOptions={sprintOptions}
           close={() => setCreating(null)}
           created={(id) => {
             setCreating(null);

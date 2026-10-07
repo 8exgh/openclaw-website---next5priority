@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 import { appendEvent } from "./events.ts";
 import { ProjectError } from "./project-errors.ts";
+import { isSprintId } from "./sprints.ts";
 import {
   removeUploadEvent,
   saveUploads,
@@ -69,6 +70,13 @@ function assignee(db: Database.Database, value: unknown): string | null {
     !db.prepare("SELECT 1 FROM users WHERE id=?").get(value)
   )
     throw new ProjectError("Choose an existing teammate for the assignment.");
+  return value;
+}
+function sprintValue(value: unknown, parentId: string | null): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (parentId) throw new ProjectError("Only root items can be assigned to a sprint.");
+  if (!isSprintId(value))
+    throw new ProjectError("Choose a Monday–Sunday sprint in YYYY-MM-dd-to-MM-dd format.");
   return value;
 }
 function requireTask(db: Database.Database, id: unknown): Task {
@@ -166,6 +174,7 @@ export function createItem(
       );
     const priority = enumValue(input.priority ?? "P3", PRIORITIES, "priority");
     const effort = effortValue(input.effort);
+    const sprintId = sprintValue(input.sprintId, parent?.id ?? null);
     const sectionId =
       kind === "bug"
         ? priority === "P1" || priority === "P2"
@@ -188,7 +197,7 @@ export function createItem(
       )
       .get(sectionId, parent?.id ?? null) as { position: number };
     db.prepare(
-      `INSERT INTO tasks (id,section_id,parent_id,title,state,position,created_at,updated_at,kind,description,public_id,priority,implementor_id,reviewer_id,created_by,completed_at,effort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO tasks (id,section_id,parent_id,title,state,position,created_at,updated_at,kind,description,public_id,priority,implementor_id,reviewer_id,created_by,completed_at,effort,sprint_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       id,
       sectionId,
@@ -207,6 +216,7 @@ export function createItem(
       actor.id,
       state === "done" ? now : null,
       effort,
+      sprintId,
     );
     const task = ownTask(db, id)!;
     const eventId = appendEvent(db, "item_created", { task, by: actor.id });
@@ -273,6 +283,8 @@ export function updateItem(
             : "bugs-low";
     }
     if (input.effort !== undefined) task.effort = effortValue(input.effort);
+    if (input.sprintId !== undefined)
+      task.sprintId = sprintValue(input.sprintId, task.parentId);
     if (input.implementorId !== undefined)
       task.implementorId = assignee(db, input.implementorId);
     if (input.reviewerId !== undefined)
@@ -302,7 +314,7 @@ export function updateItem(
           : task.updatedAt
         : null;
     db.prepare(
-      "UPDATE tasks SET title=?,description=?,state=?,priority=?,effort=?,implementor_id=?,reviewer_id=?,section_id=?,position=?,updated_at=?,completed_at=? WHERE id=?",
+      "UPDATE tasks SET title=?,description=?,state=?,priority=?,effort=?,implementor_id=?,reviewer_id=?,section_id=?,position=?,updated_at=?,completed_at=?,sprint_id=? WHERE id=?",
     ).run(
       task.title,
       task.description,
@@ -315,6 +327,7 @@ export function updateItem(
       task.position,
       task.updatedAt,
       task.completedAt,
+      task.sprintId,
       task.id,
     );
     if (input.position !== undefined) {

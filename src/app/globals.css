@@ -368,6 +368,7 @@ fieldset {
 .task-row {
   min-height: 66px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 12px;
@@ -1588,6 +1589,50 @@ fieldset {
   gap: 6px;
   padding: 14px 0 0;
   font-size: 12px;
+}
+.sprint-picker {
+  position: relative;
+  margin: 0;
+  min-width: 0;
+}
+.sprint-picker input {
+  font-size: 12px;
+}
+.sprint-picker ul {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  z-index: 25;
+  box-shadow: 0 8px 20px #17211b20;
+}
+.row-sprint {
+  flex: 0 0 225px;
+  max-width: 100%;
+}
+.project-section:has(.sprint-picker:focus-within) {
+  overflow: visible;
+}
+.task-row:has(.sprint-picker:focus-within) {
+  z-index: 20;
+}
+.detail-sprint {
+  max-width: 350px;
+  margin: 16px 0;
+}
+.sprint-badge {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.sprint-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+  max-width: 100%;
+}
+.sprint-controls .filter-field {
+  min-width: 0;
 }
 .detail-parents .parent-link {
   border: 0;

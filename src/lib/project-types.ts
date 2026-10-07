@@ -54,6 +54,7 @@ export type Task = {
   kind: ItemKind;
   sectionId: string;
   parentId: string | null;
+  sprintId: string | null;
   title: string;
   description: string;
   state: TaskState;

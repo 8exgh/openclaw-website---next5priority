@@ -1,6 +1,7 @@
 "use client";
 import { Fragment, useEffect, useState } from "react";
 import { ancestors } from "../../lib/list-view";
+import { SprintPicker } from "./sprint-picker";
 import {
   PRIORITIES,
   STATES,
@@ -34,6 +35,7 @@ export function ItemView({
   me,
   users,
   items,
+  sprintOptions,
   close,
   changed,
   open,
@@ -43,6 +45,7 @@ export function ItemView({
   me: User;
   users: User[];
   items: Task[];
+  sprintOptions: string[];
   close: () => void;
   changed: () => Promise<void>;
   open: (id: string) => void;
@@ -107,6 +110,7 @@ export function ItemView({
       effort: task.effort,
       implementorId: task.implementorId,
       reviewerId: task.reviewerId,
+      ...(!task.parentId ? { sprintId: task.sprintId } : {}),
     });
     setFiles([]);
     setEditing(true);
@@ -168,6 +172,20 @@ export function ItemView({
               )}
             </div>
           </div>
+          {!task.parentId && !editing && (
+            <div className="detail-sprint">
+              {canEdit ? (
+                <SprintPicker
+                  value={task.sprintId}
+                  options={sprintOptions}
+                  disabled={busy}
+                  onChange={(sprintId) => act({ sprintId }, "PATCH")}
+                />
+              ) : (
+                <p className="subtle small">Sprint: {task.sprintId || "No sprint"}</p>
+              )}
+            </div>
+          )}
           {!!lineage.length && (
             <nav className="detail-parents" aria-label="Parent items">
               <span className="subtle small">Part of</span>
@@ -297,6 +315,14 @@ export function ItemView({
                         }
                       />
                     </div>
+                    {!task.parentId && (
+                      <SprintPicker
+                        value={draft.sprintId ?? null}
+                        options={sprintOptions}
+                        onChange={(sprintId) => setDraft({ ...draft, sprintId })}
+                        disabled={busy}
+                      />
+                    )}
                     <div className="form-actions">
                       <button
                         type="button"

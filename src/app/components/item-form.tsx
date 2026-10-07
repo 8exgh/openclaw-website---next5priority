@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { SprintPicker } from "./sprint-picker";
 import {
   PRIORITIES,
   STATES,
@@ -26,6 +27,8 @@ export function NewItem({
   sectionId,
   parent,
   initialPriority = "P3",
+  initialSprint = null,
+  sprintOptions,
   users,
   close,
   created,
@@ -34,6 +37,8 @@ export function NewItem({
   sectionId?: string;
   parent?: Task;
   initialPriority?: Priority;
+  initialSprint?: string | null;
+  sprintOptions: string[];
   users: User[];
   close: () => void;
   created: (id: string) => void;
@@ -43,6 +48,7 @@ export function NewItem({
   const [state, setState] = useState<TaskState>("needs_review");
   const [priority, setPriority] = useState<Priority>(initialPriority);
   const [effort, setEffort] = useState<Effort | null>(null);
+  const [sprintId, setSprintId] = useState<string | null>(initialSprint);
   const [implementorId, setImplementor] = useState("");
   const [reviewerId, setReviewer] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -63,6 +69,7 @@ export function NewItem({
           state,
           priority,
           effort,
+          sprintId: parent ? null : sprintId,
           sectionId,
           parentId: parent?.id,
           implementorId,
@@ -176,6 +183,14 @@ export function NewItem({
               users={users}
             />
           </div>
+          {!parent && (
+            <SprintPicker
+              value={sprintId}
+              options={sprintOptions}
+              onChange={setSprintId}
+              disabled={busy}
+            />
+          )}
           <ErrorNotice error={error} />
           <div className="form-actions">
             <button type="button" onClick={close}>

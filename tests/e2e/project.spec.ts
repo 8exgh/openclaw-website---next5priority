@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { projectDb, hash } from "../../src/lib/project-store";
 import { E2E, mailsTo, resetSite, setSmtpMode } from "./helpers";
+import { currentSprint, shiftSprint } from "../../src/lib/sprints";
 
 // Wait for post-response delivery before the next test resets the shared log.
 test.afterEach(async ({ request }) => {
@@ -1535,7 +1536,7 @@ test("List separates Next 5 from the combined backlog and persists class, severi
 }) => {
   await login(page);
   const view = page.getByRole("navigation", { name: "View", exact: true });
-  await expect(view.getByRole("button")).toHaveText(["List", "Kanban"]);
+  await expect(view.getByRole("button")).toHaveText(["List", "Kanban", "Sprint"]);
   await expect(
     page.getByRole("navigation", { name: "List sections" }).getByRole("button"),
   ).toHaveCount(2);
@@ -1802,7 +1803,7 @@ test("legacy bug bookmarks open a filtered Backlog for readers and preserve item
     page
       .getByRole("navigation", { name: "View", exact: true })
       .getByRole("button"),
-  ).toHaveText(["List", "Kanban"]);
+  ).toHaveText(["List", "Kanban", "Sprint"]);
 });
 
 test("My tickets limits Next 5, Backlog, and Kanban to work assigned to the signed-in person, keeping subtask context", async ({
@@ -2059,4 +2060,103 @@ test("nested tickets link back to every ancestor from the root down", async ({
     dialog(page).getByRole("heading", { name: "Auth", exact: true }),
   ).toBeVisible();
   await expect(parents.getByRole("button")).toHaveText(["Platform"]);
+});
+
+test("Sprint defaults to this week, lists only assigned roots, and bookmarks populated weeks", async ({ page }) => {
+  await login(page, E2E.ownerEmail, "/sprint");
+  const current = currentSprint(), future = shiftSprint(current, 2), past = shiftSprint(current, -2);
+  const root = await create(page, {
+    title: "Sprint parent", sectionId: "next-five", priority: "P1", sprintId: current,
+  });
+  await create(page, { title: "Hidden sprint subtask", parentId: root.id });
+  await create(page, { title: "Sprint bug", kind: "bug", priority: "P4", sprintId: current });
+  await create(page, { title: "Unassigned work" });
+  const planned = await create(page, { title: "Future work", sprintId: future });
+  await create(page, { title: "Past done work", state: "done", sprintId: past });
+  await page.reload();
+  const sprint = page.getByRole("region", { name: "Sprint items", exact: true });
+  const picker = page.getByRole("combobox", { name: "Selected sprint", exact: true });
+  await expect(picker).toHaveValue(current);
+  await expect(sprint.locator(".task-title")).toHaveText(["Sprint parent", /Sprint bug/]);
+  await expect(sprint.getByRole("button", { name: /Expand subtasks/ })).toHaveCount(0);
+  await expect(sprint).not.toContainText("Hidden sprint subtask");
+  await expect(sprint).not.toContainText("Unassigned work");
+  await expect(picker.locator("option")).toHaveText([future, `${current} · Current week`, past]);
+  await picker.selectOption(future);
+  await expect(sprint.locator(".task-title")).toHaveText([planned.title]);
+  await expect(page).toHaveURL(new RegExp(`/sprint\\?sprint=${future}`));
+  await sprint.getByRole("button", { name: planned.title, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/sprint\\?sprint=${future}&item=${planned.id}`));
+  await page.reload();
+  await expect(dialog(page).getByRole("heading", { name: planned.title })).toBeVisible();
+  await close(page);
+  await expect(picker).toHaveValue(future);
+  await picker.selectOption(past);
+  await expect(sprint.locator(".task-title")).toHaveText(["Past done work"]);
+  await page.goBack();
+  await expect(picker).toHaveValue(future);
+  await page.getByRole("button", { name: "Current week", exact: true }).click();
+  await expect(picker).toHaveValue(current);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(picker).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("root sprint pickers search any date, save assignments, move items, and remove empty weeks", async ({ page }) => {
+  await login(page, E2E.ownerEmail, "/backlog");
+  const root = await create(page, { title: "Plan this root" });
+  await create(page, { title: "Child stays under root", parentId: root.id });
+  await page.reload();
+  const rowPicker = page.getByRole("combobox", { name: `Sprint for ${root.title}`, exact: true });
+  await rowPicker.fill("2030-05-15");
+  await page.getByRole("option", { name: "2030-05-13-to-05-19", exact: true }).click();
+  await expect(rowPicker).toHaveValue("2030-05-13-to-05-19");
+  await page.reload();
+  await expect(rowPicker).toHaveValue("2030-05-13-to-05-19");
+  await page.getByRole("button", { name: "Expand subtasks for Plan this root", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Sprint for Child stays under root", exact: true })).toHaveCount(0);
+  await page.getByRole("navigation", { name: "View", exact: true })
+    .getByRole("button", { name: "Sprint", exact: true }).click();
+  const selected = page.getByRole("combobox", { name: "Selected sprint", exact: true });
+  const sprint = page.getByRole("region", { name: "Sprint items", exact: true });
+  await expect(selected).toHaveValue(currentSprint());
+  await expect(sprint).toContainText("No items assigned to this sprint.");
+  await selected.selectOption("2030-05-13-to-05-19");
+  await expect(sprint.locator(".task-title")).toHaveText([root.title]);
+  await sprint.getByRole("button", { name: root.title, exact: true }).click();
+  const detailPicker = dialog(page).getByRole("combobox", { name: "Sprint", exact: true });
+  await detailPicker.fill("2030-05-20-to-05-26");
+  await detailPicker.press("Enter");
+  await expect(detailPicker).toHaveValue("2030-05-20-to-05-26");
+  await close(page);
+  await expect(selected).toHaveValue(currentSprint());
+  await expect(selected.locator("option", { hasText: "2030-05-13-to-05-19" })).toHaveCount(0);
+  await selected.selectOption("2030-05-20-to-05-26");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await rowPicker.fill("No sprint");
+  await page.getByRole("option", { name: "No sprint", exact: true }).click();
+  await expect(selected).toHaveValue(currentSprint());
+  await expect(selected.locator("option")).toHaveCount(1);
+  await expect(sprint).toContainText("No items assigned to this sprint.");
+});
+
+test("Sprint creation defaults to the selected week and readers can view but cannot assign", async ({ page }) => {
+  await login(page, E2E.ownerEmail, "/sprint");
+  await page.getByRole("button", { name: "New feature" }).click();
+  await dialog(page).getByLabel("Title", { exact: true }).fill("Created in sprint");
+  await expect(dialog(page).getByRole("combobox", { name: "Sprint", exact: true })).toHaveValue(currentSprint());
+  await dialog(page).getByRole("button", { name: "Create feature", exact: true }).click();
+  await expect(dialog(page).getByRole("heading", { name: "Created in sprint", exact: true })).toBeVisible();
+  const id = new URL(page.url()).searchParams.get("item")!;
+  await close(page);
+  const sprint = page.getByRole("region", { name: "Sprint items", exact: true });
+  await expect(sprint.locator(".task-title")).toHaveText(["Created in sprint"]);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await login(page, readerEmail, "/sprint");
+  await expect(sprint.locator(".task-title")).toHaveText(["Created in sprint"]);
+  await expect(sprint.getByRole("combobox")).toHaveCount(0);
+  const response = await page.request.patch("/api/project", {
+    headers: await sessionHeaders(page), data: { id, sprintId: null },
+  });
+  expect(response.status()).toBe(403);
 });

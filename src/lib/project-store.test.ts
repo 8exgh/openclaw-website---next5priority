@@ -244,7 +244,7 @@ test("existing installations gain the effort column once, leaving old items unse
   assert.equal(itemDetail(db, existing.id)!.task.effort, null);
   assert.deepEqual(
     db.prepare("SELECT version FROM project_migrations ORDER BY version").all(),
-    [1, 2, 3, 4, 5].map((version) => ({ version })),
+    [1, 2, 3, 4, 5, 6].map((version) => ({ version })),
   );
   updateItem(db, admin, { id: existing.id, effort: 2 });
   assert.equal(itemDetail(db, existing.id)!.task.effort, 2);

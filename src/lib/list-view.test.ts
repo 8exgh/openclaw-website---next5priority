@@ -19,6 +19,7 @@ function task(id: string, overrides: Partial<Task> = {}): Task {
     kind: "feature",
     sectionId: "feature-backlog",
     parentId: null,
+    sprintId: null,
     title: id,
     description: "",
     state: "needs_review",

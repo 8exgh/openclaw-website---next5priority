@@ -19,7 +19,7 @@ export type { Role, TaskState, User } from "./project-types.ts";
 const BASE_TASK_SELECT = `SELECT id,public_id publicId,kind,section_id sectionId,parent_id parentId,title,description,state,state ownState,priority,implementor_id implementorId,reviewer_id reviewerId,created_by createdBy,position,created_at createdAt,updated_at updatedAt FROM tasks`;
 export const TASK_SELECT = BASE_TASK_SELECT.replace(
   " FROM tasks",
-  ",completed_at completedAt,effort FROM tasks",
+  ",completed_at completedAt,effort,sprint_id sprintId FROM tasks",
 );
 export const USER_SELECT =
   "SELECT id,email,role,name,avatar_id avatarId FROM users";
@@ -196,6 +196,13 @@ export function projectDb(dbPath?: string) {
     // task rows, which include effort on a fresh database.
     db.exec("ALTER TABLE tasks ADD COLUMN effort INTEGER");
     db.prepare("INSERT INTO project_migrations VALUES (5)").run();
+  }).immediate();
+  db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM project_migrations WHERE version=6").get())
+      return;
+    // Add before migrations 3/4, which read complete task projections.
+    db.exec("ALTER TABLE tasks ADD COLUMN sprint_id TEXT");
+    db.prepare("INSERT INTO project_migrations VALUES (6)").run();
   }).immediate();
   db.transaction(() => {
     if (db.prepare("SELECT 1 FROM project_migrations WHERE version=3").get())
