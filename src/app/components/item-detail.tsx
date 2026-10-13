@@ -119,6 +119,14 @@ export function ItemView({
   const task = detail?.task;
   const following = !!detail?.followers.some((u) => u.id === me.id);
   const person = (userId: string | null) => users.find((u) => u.id === userId);
+  // Items made through the automation API record an "api:" creator; items
+  // logged before creators were stored have none.
+  const creatorName = (userId: string | null) => {
+    const user = person(userId);
+    if (user) return userName(user);
+    if (userId?.startsWith("api:")) return "Automation";
+    return userId ? "Former member" : "Unknown";
+  };
   const candidates = items.filter(
     (t) => t.id !== task?.id && (task?.kind === "bug" || t.kind === "bug"),
   );
@@ -156,8 +164,14 @@ export function ItemView({
               </span>
             )}
             <EffortBadge effort={task.effort} detailed />
-            <span className="subtle small">
-              Logged {dateLabel(task.createdAt)}
+            <span className="subtle small logged-by">
+              Logged {dateLabel(task.createdAt)} by
+              {person(task.createdBy) && (
+                <span aria-hidden="true">
+                  <Avatar user={person(task.createdBy)} />
+                </span>
+              )}
+              <strong>{creatorName(task.createdBy)}</strong>
             </span>
             <div className="toolbar-actions">
               <button
@@ -182,7 +196,9 @@ export function ItemView({
                   onChange={(sprintId) => act({ sprintId }, "PATCH")}
                 />
               ) : (
-                <p className="subtle small">Sprint: {task.sprintId || "No sprint"}</p>
+                <p className="subtle small">
+                  Sprint: {task.sprintId || "No sprint"}
+                </p>
               )}
             </div>
           )}
@@ -319,7 +335,9 @@ export function ItemView({
                       <SprintPicker
                         value={draft.sprintId ?? null}
                         options={sprintOptions}
-                        onChange={(sprintId) => setDraft({ ...draft, sprintId })}
+                        onChange={(sprintId) =>
+                          setDraft({ ...draft, sprintId })
+                        }
                         disabled={busy}
                       />
                     )}

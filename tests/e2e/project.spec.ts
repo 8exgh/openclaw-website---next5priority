@@ -581,6 +581,43 @@ test("images pasted into descriptions and comments show inline and as attachment
   await expect(card).toBeVisible();
   await expect(card).not.toContainText("attachment:");
 });
+test("item details show who created the item while viewing and editing", async ({
+  page,
+}) => {
+  await login(page, editorEmail);
+  const mine = await create(page, { title: "Saved filters" });
+  const connection = db();
+  connection
+    .prepare(
+      "INSERT INTO api_keys VALUES ('creator-bot','Creator bot',?,'edit',?)",
+    )
+    .run(hash("creator-bot-key"), new Date().toISOString());
+  connection.close();
+  const automated = await page.request.post("/api/project", {
+    headers: { Authorization: "Bearer creator-bot-key" },
+    data: { title: "Imported from monitoring" },
+  });
+  expect(automated.ok(), await automated.text()).toBeTruthy();
+  const automatedId = (await automated.json()).id;
+
+  await page.goto(`/?item=${mine.id}`);
+  const logged = dialog(page).locator(".logged-by");
+  await expect(logged).toContainText(/^Logged .+ by/);
+  await expect(logged.locator("strong")).toHaveText("Sam Lee");
+  await dialog(page)
+    .getByRole("button", { name: "Edit item", exact: true })
+    .click();
+  await expect(
+    dialog(page).getByRole("textbox", { name: "Title", exact: true }),
+  ).toBeVisible();
+  await expect(logged.locator("strong")).toHaveText("Sam Lee");
+  await close(page);
+
+  await page.goto(`/?item=${automatedId}`);
+  await expect(dialog(page).locator(".logged-by strong")).toHaveText(
+    "Automation",
+  );
+});
 test("email processor retries SMTP failure and sends assignment, comment and follow notifications once", async ({
   page,
 }) => {

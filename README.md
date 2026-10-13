@@ -72,7 +72,9 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   bugs completed within the last 28 days, including completed features moved
   back to the backlog. Older completed items remain accessible in the lists.
 - **Details:** titles, multiline descriptions, effort, implementor/reviewer
-  assignments, comments and attachments. Descriptions display as text in view
+  assignments, comments and attachments. The header shows when the item was
+  logged and who created it, in both view and edit mode; items created through
+  the automation API show "Automation". Descriptions display as text in view
   mode and as textareas when editing. Pasting an image into a description or
   comment stages it as an attachment named `pasted-image-N.png` and inserts an
   `![name](attachment:name)` marker at the caret; once saved, the marker

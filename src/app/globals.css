@@ -1687,3 +1687,19 @@ fieldset {
     padding: 10px 12px 5px;
   }
 }
+
+.logged-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.logged-by strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.logged-by .avatar {
+  width: 20px;
+  height: 20px;
+  font-size: 8px;
+}
