@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 import { appendEvent, openDb } from "./events.ts";
 import {
+  isDoneState,
   SECTIONS,
   STATES,
   type Attachment,
@@ -170,15 +171,17 @@ export function projectDb(dbPath?: string) {
       if (!id || !STATES.includes(state)) continue;
       const previous = history.get(id);
       const completedAt =
-        state === "done"
-          ? previous?.state === "done"
+        isDoneState(state)
+          ? previous && isDoneState(previous.state)
             ? previous.completedAt
             : row.updatedAt || event.timestamp
           : null;
       history.set(id, { state, completedAt });
     }
     const completed = db
-      .prepare("SELECT id,updated_at updatedAt FROM tasks WHERE state='done'")
+      .prepare(
+        "SELECT id,updated_at updatedAt FROM tasks WHERE state IN ('done','done_no_action_required')",
+      )
       .all() as { id: string; updatedAt: string }[];
     for (const task of completed) {
       db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(
@@ -337,7 +340,7 @@ export function allTasks(db: Database.Database, legacyRollups = false): Task[] {
         )
       : row.ownState;
     const completedAt =
-      state !== "done"
+      !isDoneState(state)
         ? null
         : legacyRollups && nested.length
           ? nested

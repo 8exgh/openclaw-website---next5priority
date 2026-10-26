@@ -430,7 +430,8 @@ fieldset {
   background: transparent;
   color: var(--green);
 }
-.state-done > .task-title > span:not(.item-id):not(.computed) {
+.state-done > .task-title > span:not(.item-id):not(.computed),
+.state-done_no_action_required > .task-title > span:not(.item-id):not(.computed) {
   text-decoration: line-through;
   color: var(--muted);
 }
@@ -498,7 +499,8 @@ fieldset {
   background: #eee7f6;
   color: #725493;
 }
-.status-done {
+.status-done,
+.status-done_no_action_required {
   background: #e1eee6;
   color: #1f6b48;
 }
@@ -1157,7 +1159,8 @@ fieldset {
 }
 .kanban-board {
   display: grid;
-  grid-template-columns: repeat(6, minmax(250px, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(250px, 1fr);
   gap: 14px;
   align-items: stretch;
   min-height: 430px;
@@ -1193,7 +1196,8 @@ fieldset {
 .kanban-in_review .kanban-heading {
   border-color: #b2a0c9;
 }
-.kanban-done .kanban-heading {
+.kanban-done .kanban-heading,
+.kanban-done_no_action_required .kanban-heading {
   border-color: #78a58a;
 }
 .kanban-ready_for_development .kanban-heading {
@@ -1343,7 +1347,7 @@ fieldset {
 }
 @media (max-width: 520px) {
   .kanban-board {
-    grid-template-columns: repeat(6, minmax(270px, 1fr));
+    grid-auto-columns: minmax(270px, 1fr);
   }
   .board-tabs {
     display: grid;

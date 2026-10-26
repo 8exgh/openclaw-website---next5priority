@@ -6,6 +6,7 @@ export const STATES = [
   "in_qa",
   "in_review",
   "done",
+  "done_no_action_required",
 ] as const;
 export type TaskState = (typeof STATES)[number];
 export const STATE_LABELS: Record<TaskState, string> = {
@@ -15,7 +16,11 @@ export const STATE_LABELS: Record<TaskState, string> = {
   in_qa: "In QA",
   in_review: "In review",
   done: "Done",
+  done_no_action_required: "Done - No action required",
 };
+export function isDoneState(state: TaskState | undefined): boolean {
+  return state === "done" || state === "done_no_action_required";
+}
 export const PRIORITIES = ["P1", "P2", "P3", "P4"] as const;
 export type Priority = (typeof PRIORITIES)[number];
 export const EFFORTS = [1, 2, 3, 4, 5] as const;

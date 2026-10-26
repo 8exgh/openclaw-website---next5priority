@@ -199,6 +199,21 @@ test("matching subtasks retain their ancestors as context without leaking unrela
   );
 });
 
+test("no-action completion has a distinct state filter that survives bookmarks", () => {
+  const filters = { ...defaultFilters(), state: "done_no_action_required" as const };
+  const items = [
+    task("closed", { state: "done_no_action_required" }),
+    task("implemented", { state: "done" }),
+    task("active"),
+  ];
+  assert.deepEqual(filterList(items, filters).map((item) => item.id), ["closed"]);
+  for (const tab of ["next-five", "backlog", "kanban"] as const) {
+    const url = listUrl(new URL("https://app.test/"), tab, filters);
+    assert.equal(url.searchParams.get("state"), "done_no_action_required");
+    assert.deepEqual(readListLocation(url), { tab, filters });
+  }
+});
+
 test("filter bookmarks round trip including an empty severity selection and item links", () => {
   for (const severities of [
     [],

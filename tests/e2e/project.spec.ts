@@ -875,7 +875,7 @@ test("Kanban combines priorities, moves cards, and keeps only four weeks of Done
   await page.reload();
   await page.getByRole("button", { name: "Kanban", exact: true }).click();
   const board = page.getByRole("region", { name: "Kanban board", exact: true });
-  await expect(board.getByRole("region")).toHaveCount(6);
+  await expect(board.getByRole("region")).toHaveCount(7);
   await expect(
     board.getByRole("button", { name: feature.title, exact: true }),
   ).toBeVisible();
@@ -1297,6 +1297,54 @@ test("state labels save directly in lists and details, preserve subtasks, and re
   );
 });
 
+test("Done - No action required persists, filters separately, and behaves as completed work", async ({ page }) => {
+  await login(page, E2E.ownerEmail, "/backlog");
+  const item = await create(page, {
+    title: "Working as designed",
+    sprintId: currentSprint(),
+  });
+  await create(page, { title: "Implemented change", state: "done" });
+  await page.reload();
+  const backlog = page.getByRole("region", { name: "Backlog", exact: true });
+  await backlog.getByLabel(`State for ${item.title}`, { exact: true })
+    .selectOption({ label: "Done - No action required" });
+  await page.getByLabel("Filter by state", { exact: true })
+    .selectOption("done_no_action_required");
+  await expect(backlog.locator(".task-title")).toHaveText([item.title]);
+  await expect(page).toHaveURL(/state=done_no_action_required/);
+  await page.reload();
+  await expect(backlog.getByLabel(`State for ${item.title}`, { exact: true }))
+    .toHaveValue("done_no_action_required");
+  const detail = await page.request.get(`/api/project?id=${item.id}`, {
+    headers: await sessionHeaders(page),
+  });
+  const completedAt = (await detail.json()).detail.task.completedAt;
+  expect(completedAt).toBeTruthy();
+  await backlog.getByRole("button", { name: item.title, exact: true }).click();
+  await expect(dialog(page).getByLabel(`State for ${item.title}`, { exact: true }))
+    .toHaveValue("done_no_action_required");
+  await close(page);
+  await page.getByRole("button", { name: "Sprint", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Sprint items", exact: true })
+    .getByLabel(`State for ${item.title}`, { exact: true }))
+    .toHaveValue("done_no_action_required");
+  await page.getByRole("button", { name: "Kanban", exact: true }).click();
+  const column = page.getByRole("region", {
+    name: "Done - No action required column", exact: true,
+  });
+  await column.scrollIntoViewIfNeeded();
+  await expect(column).toContainText("Completed in the last 4 weeks");
+  await expect(column.getByRole("article", { name: item.title, exact: true }))
+    .toContainText("Completed");
+  await column.getByLabel(`State for ${item.title}`, { exact: true }).selectOption("done");
+  await expect(page.getByRole("region", { name: "Done column", exact: true }))
+    .toContainText(item.title);
+  const changed = await page.request.get(`/api/project?id=${item.id}`, {
+    headers: await sessionHeaders(page),
+  });
+  expect((await changed.json()).detail.task.completedAt).toBe(completedAt);
+});
+
 test("a Kanban card can be dragged repeatedly from the second column and back", async ({
   page,
 }) => {
@@ -1317,6 +1365,7 @@ test("a Kanban card can be dragged repeatedly from the second column and back", 
     ["In QA", "in_qa"],
     ["In review", "in_review"],
     ["Done", "done"],
+    ["Done - No action required", "done_no_action_required"],
     ["In review", "in_review"],
     ["In QA", "in_qa"],
     ["In progress", "in_progress"],
@@ -1431,7 +1480,7 @@ test("Kanban drag cancels safely, recovers from failed saves, and scrolls to dis
     await page.mouse.up();
     await expect(
       board.getByLabel(`State for ${task.title}`, { exact: true }),
-    ).toHaveValue(side === "right" ? "done" : "needs_review");
+    ).toHaveValue(side === "right" ? "done_no_action_required" : "needs_review");
   }
   await expect(dialog(page)).toHaveCount(0);
   expect(changes).toHaveLength(4);

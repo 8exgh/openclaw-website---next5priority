@@ -56,19 +56,22 @@ admin/editor/read-only roles, SQLite CQRS events, and a bearer-token automation 
   Every bug gets a permanent, incrementing `SAV-000001` style identifier; deleted
   identifiers are never reused. Bugs are independent items; use links to connect them.
 - **States:** Needs review → Ready for development → In progress → In QA →
-  In review → Done. Editors can change any item's state directly from its
+  In review → Done, with **Done - No action required** as an alternative final
+  state for work closed without changes (API value: `done_no_action_required`).
+  Both final states record a completion date; switching between them preserves
+  that date. Reopening clears it. Editors can change any item's state directly from its
   colored label in lists, details, or Kanban. Parent and subtask states are
   independent: moving a parent keeps its subtasks in their current states.
   Completion does not automatically remove a feature from Next 5: move it back
   to the backlog to free its slot. The state filter includes completed work.
 - **Kanban:** available directly at `/kanban`; refresh and browser back/forward
   retain the selected view, including open items at `/kanban?item=<id>`.
-  Six columns from Needs review through Done combine the Next 5
+  Seven columns from Needs review through Done - No action required combine the Next 5
   features with P1/P2 bugs. Editors move any card, including parent features,
   by dragging it into a column or selecting a state. Dragging near the board's
   left/right edges scrolls to other columns; Escape cancels a drag. On touch
   screens, use the grip to drag while the rest of the card allows vertical scrolling.
-  Done shows features and P1/P2
+  Both Done columns show features and P1/P2
   bugs completed within the last 28 days, including completed features moved
   back to the backlog. Older completed items remain accessible in the lists.
 - **Details:** titles, multiline descriptions, effort, implementor/reviewer

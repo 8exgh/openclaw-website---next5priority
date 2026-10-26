@@ -16,6 +16,7 @@ import {
 import { itemDetail, moveTree, nextBugId, ownTask } from "./project-store.ts";
 import {
   EFFORTS,
+  isDoneState,
   PRIORITIES,
   STATES,
   STATE_LABELS,
@@ -214,7 +215,7 @@ export function createItem(
       implementorId,
       reviewerId,
       actor.id,
-      state === "done" ? now : null,
+      isDoneState(state) ? now : null,
       effort,
       sprintId,
     );
@@ -308,8 +309,8 @@ export function updateItem(
     }
     task.updatedAt = new Date().toISOString();
     task.completedAt =
-      task.state === "done"
-        ? old.state === "done"
+      isDoneState(task.state)
+        ? isDoneState(old.state)
           ? old.completedAt
           : task.updatedAt
         : null;

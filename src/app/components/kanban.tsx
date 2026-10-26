@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { kanbanColumns } from "../../lib/kanban";
 import { ancestors, assignedTo } from "../../lib/list-view";
-import { userName, type Task, type User } from "../../lib/project-types";
+import { isDoneState, userName, type Task, type User } from "../../lib/project-types";
 import { plainText } from "../../lib/rich-text";
 import { Avatar, dateLabel, EffortBadge, StateControl } from "./project-ui";
 import { useKanbanDrag } from "./use-kanban-drag";
@@ -56,7 +56,7 @@ export function Kanban({
   return (
     <>
       <p className="kanban-hint">
-        Active work: Next 5 features and P1/P2 bugs. Done: completed features
+        Active work: Next 5 features and P1/P2 bugs. Both Done columns: completed features
         and P1/P2 bugs from the last 4 weeks.
         {canEdit && " Move a card between columns, or use its state menu."}
       </p>
@@ -81,7 +81,7 @@ export function Kanban({
                   <h2>{column.label}</h2>
                   <span className="count">{cards.length}</span>
                 </div>
-                {column.state === "done" && (
+                {isDoneState(column.state) && (
                   <p className="kanban-window">Completed in the last 4 weeks</p>
                 )}
                 <div className="kanban-cards">
@@ -168,7 +168,7 @@ export function Kanban({
                             </span>
                           )}
                         </div>
-                        {task.state === "done" && task.completedAt && (
+                        {isDoneState(task.state) && task.completedAt && (
                           <p className="kanban-completed">
                             Completed {dateLabel(task.completedAt)}
                           </p>

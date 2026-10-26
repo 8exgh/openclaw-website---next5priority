@@ -525,7 +525,7 @@ test("bug IDs increment without reuse and lists sort by priority then logged dat
   db.close();
 });
 
-test("all six states persist independently for parents and subtasks", () => {
+test("all states persist independently for parents and subtasks", () => {
   const db = setup();
   const parent = feature(db);
   const a = createItem(db, admin, { title: "A", parentId: parent.id });
@@ -533,12 +533,13 @@ test("all six states persist independently for parents and subtasks", () => {
   updateItem(db, admin, { id: b.id, state: "done" });
   for (const state of STATES) {
     updateItem(db, admin, { id: a.id, state });
+    assert.equal(itemDetail(db, a.id)!.task.state, state);
     assert.equal(itemDetail(db, parent.id)!.task.state, "needs_review");
   }
   for (const state of STATES) {
     updateItem(db, admin, { id: parent.id, state });
     assert.equal(itemDetail(db, parent.id)!.task.state, state);
-    assert.equal(itemDetail(db, a.id)!.task.state, "done");
+    assert.equal(itemDetail(db, a.id)!.task.state, STATES.at(-1));
     assert.equal(itemDetail(db, b.id)!.task.state, "done");
   }
   assert.throws(

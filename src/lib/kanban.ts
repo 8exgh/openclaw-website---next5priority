@@ -1,4 +1,5 @@
 import {
+  isDoneState,
   STATES,
   STATE_LABELS,
   type Task,
@@ -13,7 +14,7 @@ export function kanbanColumns(items: Task[], now = Date.now()): KanbanColumn[] {
     if (task.parentId) return false;
     if (task.kind === "bug" && task.priority !== "P1" && task.priority !== "P2")
       return false;
-    if (task.state === "done") {
+    if (isDoneState(task.state)) {
       // Finished features remain visible even after moving back to the backlog
       // to free a priority slot. Old work remains accessible in the list views.
       const completed = task.completedAt ? Date.parse(task.completedAt) : NaN;
@@ -29,7 +30,7 @@ export function kanbanColumns(items: Task[], now = Date.now()): KanbanColumn[] {
     tasks: visible
       .filter((task) => task.state === state)
       .sort((a, b) => {
-        if (state === "done")
+        if (isDoneState(state))
           return (
             (b.completedAt || "").localeCompare(a.completedAt || "") ||
             a.id.localeCompare(b.id)

@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { appendEvent } from "./events.ts";
 import { allTasks, itemDetail, projectDb } from "./project-store.ts";
-import { addComment, createItem, updateItem } from "./project-commands.ts";
+import { addComment, convertItem, createItem, updateItem } from "./project-commands.ts";
 import { DONE_WINDOW_MS, kanbanColumns } from "./kanban.ts";
 import { STATES, type User } from "./project-types.ts";
 
@@ -18,7 +18,7 @@ const setup = (file = ":memory:") => {
   return db;
 };
 
-test("Kanban scopes active work to root Next 5 features and P1/P2 bugs, across all six columns", () => {
+test("Kanban scopes active work to root Next 5 features and P1/P2 bugs, across all columns", () => {
   const db = setup();
   const focus = createItem(db, actor, {
     title: "Focus",
@@ -61,7 +61,8 @@ test("Kanban scopes active work to root Next 5 features and P1/P2 bugs, across a
   db.close();
 });
 
-test("Done uses the inclusive 28-day completion boundary, for features and high-priority bugs", () => {
+for (const state of ["done", "done_no_action_required"] as const)
+test(`${state} uses the inclusive 28-day completion boundary, for features and high-priority bugs`, () => {
   const db = setup();
   const now = Date.now();
   const cutoff = new Date(now - DONE_WINDOW_MS).toISOString();
@@ -69,34 +70,34 @@ test("Done uses the inclusive 28-day completion boundary, for features and high-
   const future = new Date(now + 1000).toISOString();
   const recentFeature = createItem(db, actor, {
     title: "Completed feature in backlog",
-    state: "done",
+    state,
   });
   const recentBug = createItem(db, actor, {
     kind: "bug",
     priority: "P1",
     title: "Completed bug",
-    state: "done",
+    state,
   });
   const oldFeature = createItem(db, actor, {
     title: "Old feature",
     sectionId: "next-five",
-    state: "done",
+    state,
   });
   const oldBug = createItem(db, actor, {
     title: "Old bug",
     kind: "bug",
     priority: "P2",
-    state: "done",
+    state,
   });
   const futureFeature = createItem(db, actor, {
     title: "Future completion",
-    state: "done",
+    state,
   });
   const lowBug = createItem(db, actor, {
     title: "Low bug",
     kind: "bug",
     priority: "P3",
-    state: "done",
+    state,
   });
   for (const task of [recentFeature, recentBug, lowBug])
     db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(
@@ -110,7 +111,7 @@ test("Done uses the inclusive 28-day completion boundary, for features and high-
     futureFeature.id,
   );
   const done = kanbanColumns(allTasks(db), now).find(
-    (c) => c.state === "done",
+    (c) => c.state === state,
   )!;
   assert.deepEqual(
     new Set(done.tasks.map((t) => t.id)),
@@ -121,6 +122,42 @@ test("Done uses the inclusive 28-day completion boundary, for features and high-
     "Older work remains available in the app",
   );
   db.close();
+});
+
+test("no-action completion persists across edits, final-state changes, and conversion; reopening starts a new completion", () => {
+  const db = setup();
+  try {
+    const task = createItem(db, actor, {
+      title: "No change needed",
+      state: "done_no_action_required",
+    });
+    assert.ok(task.completedAt);
+    assert.equal(itemDetail(db, task.id)!.task.completedAt, task.completedAt);
+    const completed = "2026-01-01T00:00:00.000Z";
+    db.prepare("UPDATE tasks SET completed_at=? WHERE id=?").run(completed, task.id);
+    addComment(db, actor, { id: task.id, body: "Confirmed working as designed" });
+    for (const state of ["done_no_action_required", "done", "done_no_action_required"] as const) {
+      const updated = updateItem(db, actor, { id: task.id, state, title: "Reviewed" });
+      assert.equal(updated.completedAt, completed);
+      assert.equal(itemDetail(db, task.id)!.task.completedAt, completed);
+      assert.ok(!kanbanColumns(allTasks(db)).some((column) => column.tasks.length));
+    }
+    const converted = convertItem(db, actor, { id: task.id, kind: "bug" });
+    assert.equal(converted.state, "done_no_action_required");
+    assert.equal(converted.completedAt, completed);
+    const reopened = updateItem(db, actor, {
+      id: task.id, priority: "P1", state: "in_progress",
+    });
+    assert.equal(reopened.completedAt, null);
+    const before = Date.now();
+    const closed = updateItem(db, actor, { id: task.id, state: "done_no_action_required" });
+    assert.ok(Date.parse(closed.completedAt!) >= before);
+    const column = kanbanColumns(allTasks(db)).find((c) => c.state === closed.state)!;
+    assert.equal(column.label, "Done - No action required");
+    assert.deepEqual(column.tasks.map((item) => item.id), [task.id]);
+  } finally {
+    db.close();
+  }
 });
 
 test("comments and metadata edits do not renew completion; reopening and completing does", () => {
@@ -297,13 +334,13 @@ test("completion migration replays historical transitions and ignores later edit
   appendEvent(db, "item_updated", {
     task: {
       ...task,
-      state: "done",
-      ownState: "done",
+      state: "done_no_action_required",
+      ownState: "done_no_action_required",
       updatedAt: "2026-04-01T00:00:00.000Z",
     },
   });
   db.prepare(
-    "UPDATE tasks SET state='done',updated_at='2026-04-01T00:00:00.000Z'",
+    "UPDATE tasks SET state='done_no_action_required',updated_at='2026-04-01T00:00:00.000Z'",
   ).run();
   db.exec(
     "ALTER TABLE tasks DROP COLUMN completed_at; DELETE FROM project_migrations WHERE version=2",
